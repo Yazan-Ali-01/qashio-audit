@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Qashio product audit, a case study in verification</title>
-<meta name="description" content="A forensic review of Qashio's ERP API and web application, built from public evidence only. Thirty findings, eight things working, four open questions, and one retracted theory.">
+<title>Qashio product audit, thirty-three findings from public evidence</title>
+<meta name="description" content="Rather than join the hiring queue, I spent a weekend inside Qashio's public API docs, OpenAPI specification and login page. Thirty-three findings, eight things done well, four open questions. Every claim carries its evidence.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -90,13 +90,20 @@ pre{
 pre b{font-weight:500;color:var(--red)}
 pre i{font-style:normal;color:var(--green)}
 
-.controls{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 1.4rem}
+.controls{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 1.2rem;position:sticky;top:0;z-index:3;background:var(--cream);padding:.8rem 0;border-bottom:1px solid var(--gold-soft)}
 .chip{font:inherit;font-size:.83rem;font-weight:500;background:none;border:1px solid var(--gold-soft);color:var(--ink-soft);padding:.3rem .72rem;border-radius:999px;cursor:pointer}
 .chip[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:var(--cream)}
 .chip:hover{border-color:var(--gold)}
 
 .finding{border-bottom:1px solid var(--cream-sunk)}
-.finding > summary{list-style:none;cursor:pointer;padding:.85rem 0 .85rem 3.2rem;position:relative;display:grid;grid-template-columns:1fr auto;gap:.6rem 1rem;align-items:baseline}
+.finding > summary{list-style:none;cursor:pointer;padding:.85rem 1.8rem .85rem 3.2rem;position:relative;display:grid;grid-template-columns:1fr auto;gap:.6rem 1rem;align-items:baseline;transition:background .15s ease}
+.finding > summary:hover{background:var(--cream-deep)}
+.finding > summary:hover .f-title{color:var(--green)}
+.finding[open] > summary{background:var(--cream-deep)}
+.finding > summary::after{content:"";position:absolute;right:.5rem;top:1.2rem;width:.44rem;height:.44rem;border-right:1.7px solid var(--ink-soft);border-bottom:1.7px solid var(--ink-soft);transform:rotate(45deg);transition:transform .2s ease}
+.finding[open] > summary::after{transform:rotate(-135deg)}
+.finding[open] .f-body{animation:reveal .22s ease both}
+@keyframes reveal{from{opacity:0;transform:translateY(-5px)}}
 .finding > summary::-webkit-details-marker{display:none}
 .finding > summary::before{content:attr(data-mark);position:absolute;left:0;top:.9rem;font-family:"JetBrains Mono",monospace;font-size:.72rem;color:var(--gold)}
 .finding[data-sev="critical"] > summary::before{color:var(--red)}
@@ -156,6 +163,20 @@ footer{font-size:.82rem;color:var(--ink-soft);padding-bottom:3rem;border-top:1px
   .claim .strike::after{animation:none;transform:scaleX(1)}
   *{transition:none!important}
 }
+.kicker{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.75rem;color:var(--ink-soft);margin:0 0 1.15rem}
+.firstfind{margin-top:2.3rem;border-top:1px solid var(--gold);border-bottom:1px solid var(--gold);padding:1.25rem 0 1.4rem;max-width:44rem}
+.firstfind .src{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.76rem;color:var(--ink-soft);margin:0 0 .85rem}
+.sources{margin:0 0 1.05em;padding-left:1.15rem;max-width:38rem;font-size:.95rem}
+.sources li{margin-bottom:.28rem}
+.hint{display:inline-flex;align-items:center;gap:.5rem;font-size:.88rem;font-weight:500;color:var(--green);margin:0 0 1.1rem}
+.hint::before{content:"";width:.42rem;height:.42rem;border-right:1.7px solid var(--green);border-bottom:1.7px solid var(--green);transform:rotate(45deg)}
+.scope{border-left:2.5px solid var(--red);padding-left:1rem;max-width:38rem;font-size:.96rem}
+.scope b{font-weight:600;color:var(--red)}
+.sw{display:inline-block;width:.8rem;height:.8rem;vertical-align:-.05em;margin-right:.35rem}
+.sw-used{background:var(--green)}
+.sw-unused{background:var(--cream-sunk);background-image:repeating-linear-gradient(135deg,transparent 0 4px,rgba(26,25,24,.13) 4px 5px)}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.finding[open] .f-body{animation:none}}
 </style>
 </head>
 <body>
@@ -167,40 +188,43 @@ footer{font-size:.82rem;color:var(--ink-soft);padding-bottom:3rem;border-top:1px
 </header>
 
 <div class="hero">
-  <h1>The one bold instruction in your API guide points at fields that don't come back.</h1>
+  <p class="kicker">no account &middot; no credentials &middot; nothing behind a login</p>
 
-  <div class="claim"><span class="strike">billingCurrency</span> should be used for all integrations as it represents the actual card account currency charged. <span class="strike">billingAmount</span> is the amount initially authorized on the card.</div>
+  <h1>Everyone else is sitting in your pipeline. I went and used the product.</h1>
 
-  <p class="verdict"><b>Neither field is ever returned.</b> Not in the list response, not in the single-transaction response. Your declared response type, <code>FindAllResErpTransactionObjectDto</code>, lists 54 properties. Neither field is among them. <code>billingCurrency</code> is at least an accepted query filter, so the concept exists somewhere server side. <code>billingAmount</code> appears nowhere in the API at all. And this is the number your customers put in a general ledger.</p>
+  <p class="standfirst">A thousand engineers can send you the same CV. I would rather show you I can read a payload. So I spent a weekend inside your public API guide, your OpenAPI specification and your login page, and wrote down everything that would bite an integrator.</p>
 
-  <p class="standfirst">That took me about twenty minutes to find, in documentation you publish yourselves. Thirty-two more followed across your ERP API and your web app. This page is all of them, with the evidence attached to each one.</p>
+  <p class="standfirst">Thirty-three findings. Here is the first, about twenty minutes in.</p>
+
+  <div class="firstfind">
+    <p class="src">developers.qashio.com, Integration-Critical Notes</p>
+    <div class="claim"><span class="strike">billingCurrency</span> should be used for all integrations as it represents the actual card account currency charged. <span class="strike">billingAmount</span> is the amount initially authorized on the card.</div>
+    <p class="verdict"><b>Neither field is ever returned.</b> Your declared response type <code>FindAllResErpTransactionObjectDto</code> lists 54 properties and includes neither. <code>billingCurrency</code> is at least an accepted query filter, so the concept exists server side. <code>billingAmount</code> appears nowhere in the API at all. This is the number your customers post to a general ledger.</p>
+  </div>
+</div>
 
 <div class="tally">
-  <div><span class="n">32</span><span>findings confirmed</span></div>
+  <div><span class="n">33</span><span>findings confirmed</span></div>
   <div class="ok"><span class="n">8</span><span>things working well</span></div>
   <div><span class="n">4</span><span>open questions</span></div>
 </div>
 
 <section>
-  <h2>How this was done, and where I stopped</h2>
-  <p class="lede">I don't have a Qashio account and I didn't go looking for one. Everything here came out of four places anyone can reach without a password.</p>
-  <p>Your integration guide at <code>developers.qashio.com</code>. Your OpenAPI spec, linked publicly from that same guide, at <code>erp.qashio.com/api/docs</code>. The response headers and JavaScript bundle on your unauthenticated login page. And Google's own field telemetry for that page, out of the Chrome User Experience Report.</p>
-  <p>No requests hit your API. No credentials held, none hunted for. Nothing probed, fuzzed or load-tested, and nothing behind a login touched. Reading your published docs isn't an attack, and I kept it that way on purpose. You're a regulated fintech. An applicant who treats your production systems as a sandbox has answered a completely different question than the one on your job ad.</p>
-  <p>One finding isn't on this page, and that was a choice. It's about how request scope gets established. It's a design question rather than something I proved, and proving it would have meant crossing the line above, so it came to you privately and phrased as a question, separately from this page. A stranger emailing you an unsolicited vulnerability claim isn't a contribution. It's a problem you now have to deal with.</p>
+  <h2>Where this came from, and where I stopped</h2>
+  <p class="lede">Four sources, all public. No account, and I did not go looking for one.</p>
+  <ol class="sources">
+    <li>Your integration guide, <code>developers.qashio.com</code></li>
+    <li>Your OpenAPI specification, <code>erp.qashio.com/api/docs</code>, linked publicly from that guide</li>
+    <li>Response headers and the JavaScript coverage profile of your unauthenticated login page</li>
+    <li>Google's Chrome User Experience Report field data for that page</li>
+  </ol>
+  <p>No requests hit your API. Nothing probed, fuzzed or load-tested. You are a regulated fintech, and an applicant who treats your production systems as a sandbox has answered a different question than the one on your job ad.</p>
+  <p>One finding is deliberately not here. It concerns how request scope is established. It is a design question rather than something I proved, and proving it would have meant crossing the line above, so it went to you privately and phrased as a question.</p>
 </section>
 
 <section>
   <h2>Exhibit one: which number goes in the ledger?</h2>
-  <p class="lede">Back to the fields from the top of this page, because the interesting part isn't that they're missing. It's what you get instead.</p>
-
-  <div class="exhibit">
-    <p class="src">developers.qashio.com, Integration-Critical Notes</p>
-    <pre><b>billingCurrency</b> should be used for all integrations as it represents
-the actual card account currency charged.
-<b>billingAmount</b> is the amount initially authorized on the card.</pre>
-  </div>
-
-  <p>Here's the response, straight from your published example:</p>
+  <p class="lede">The missing fields are not the problem. What you get instead is.</p>
 
   <div class="exhibit">
     <p class="src">erp.qashio.com/api/docs, GET /erp-transactions, response example</p>
@@ -209,20 +233,20 @@ the actual card account currency charged.
 "feeCharges": 2.75          <i>// no currency field, no inclusion rule</i></pre>
   </div>
 
-  <p>Same currency. Two values. Neither one documented, and no rule for which wins. So somebody doing exactly what your guide tells them reaches for a field that isn't there, then guesses between two that are. In a market where VAT recovery hangs on which number got posted.</p>
+  <p>Same currency, two values, neither documented, and no rule for which one wins. An integrator follows your guide to a field that is not there, then guesses between two that are, in a market where VAT recovery depends on the answer.</p>
 
-  <p>How bad is it, though? I can't tell from out here, and you can in about five minutes. Working it out means watching a transaction cross from authorisation to settlement on a real account, and I don't have one. If your amounts do update on clearing, this is a documentation defect and a serious one. If they don't, it's a settlement modelling gap, which is worse. So I logged it as an open question instead of picking whichever version sounded better.</p>
+  <p>Whether this is a documentation defect or a settlement modelling gap turns on whether your amounts update on clearing. That needs a real account to watch a transaction cross from authorisation to settlement, so I logged it as an open question rather than picking whichever version sounded worse.</p>
 </section>
 
 <section>
   <h2>Exhibit two: the only endpoint that changes is the only one you cannot follow</h2>
   <p class="lede">Chart of accounts, suppliers, tax rates and bank accounts all accept <code>updatedAtFrom</code> and <code>updatedAtTo</code>. That is master data. It barely moves.</p>
 
-  <p>Transactions get <code>clearedAtFrom</code> and <code>transactionTimeFrom</code>, both of which timestamp when the money moved, and no <code>updatedAt</code> filter at all. Meanwhile the response hands you <code>updatedAt</code> <em>and</em> <code>modifiedDate</code>. The timestamps are sitting right there. You just can't query them.</p>
+  <p>Transactions get <code>clearedAtFrom</code> and <code>transactionTimeFrom</code>, both of which timestamp when the money moved, and no <code>updatedAt</code> filter at all. The response hands you <code>updatedAt</code> <em>and</em> <code>modifiedDate</code>. The timestamps are right there. You just cannot query them.</p>
 
-  <p>And transaction records move constantly after settlement. Approvals land, receipts get attached, someone edits a memo or a segment, sync status advances. None of that touches <code>clearedAt</code> or <code>transactionTime</code>, so none of it is findable without re-reading the whole thing. At 30 requests a minute and 500 rows a page, a customer with a hundred thousand transactions needs around two hundred sequential calls. Seven minutes of scanning, give or take, across a collection that's shifting underneath the cursor the entire time.</p>
+  <p>Transaction records move constantly after settlement: approvals land, receipts get attached, someone edits a memo or a segment, sync status advances. None of that touches <code>clearedAt</code> or <code>transactionTime</code>, so none of it is findable without re-reading everything. At 30 requests a minute and 500 rows a page, a customer with a hundred thousand transactions needs around two hundred sequential calls. Roughly seven minutes, across a collection shifting underneath the cursor the whole time.</p>
 
-  <p>Offset pagination over a moving collection doesn't degrade gracefully. It breaks in two directions, so I tested both instead of asserting either:</p>
+  <p>Offset pagination over a moving collection breaks in both directions, so I tested both rather than asserting either:</p>
 
   <div class="exhibit">
     <p class="src">verify.mjs, run against the published example payloads, 10/10 passing</p>
@@ -231,7 +255,7 @@ delete mid-scan  <b>t10 never returned</b>           silently missing from the l
 keyset cursor    <i>no duplicate, no gap</i>          insert appears on a later page</pre>
   </div>
 
-  <p>And since a full scan is the <em>only</em> sync mode on offer, none of this is an edge case. It's the normal condition of every sync a busy customer runs.</p>
+  <p>A full scan is the <em>only</em> sync mode on offer, so this is the normal condition of every sync a busy customer runs, not an edge case.</p>
 </section>
 
 <section>
@@ -245,12 +269,12 @@ keyset cursor    <i>no duplicate, no gap</i>          insert appears on a later 
     <div class="out" id="rtout"></div>
   </div>
 
-  <p>Three of the four transaction enums break on the round trip and one works fine, so you can't learn the rule from a single test. Then the integration guide lists the same enum in a third casing, <code>CARD_LOADING</code>, with one entry written <code>FORCED DEBIT</code>, space and all. Three conventions, one concept, spread across two documents and a live API.</p>
+  <p>Three of the four transaction enums break on the round trip and one works fine, so the rule is not learnable from a single test. Your integration guide then lists the same enum in a third casing, <code>CARD_LOADING</code>, with one entry written <code>FORCED DEBIT</code>, space and all.</p>
 </section>
 
 <section>
   <h2>Exhibit four: the login page</h2>
-  <p class="lede">Google's field data says <code>app.qashio.com/login</code> fails its Core Web Vitals assessment. The failure isn't the interesting part. The cause is, because there's no ambiguity in it whatsoever.</p>
+  <p class="lede">Google's field data says <code>app.qashio.com/login</code> fails its Core Web Vitals assessment. The cause has no ambiguity in it.</p>
 
   <div class="vitals">
     <div class="vital fail"><div class="v">3.0s</div><div class="k">Largest contentful paint</div></div>
@@ -260,31 +284,32 @@ keyset cursor    <i>no duplicate, no gap</i>          insert appears on a later 
     <div class="vital pass"><div class="v">0.7s</div><div class="k">Time to first byte</div></div>
   </div>
 
-  <p class="chain">First byte lands at 0.7 seconds. Nothing paints until 2.5. That 1.8-second gap is the entire story. Your server is fine, your Dubai edge is fine, and every bit of the delay is bundle download, parse and execute against an empty HTML shell. Largest paint trails first paint by half a second, so it doesn't need its own fix. Close the gap and it comes along.</p>
+  <p class="chain">First byte lands at 0.7 seconds. Nothing paints until 2.5. That 1.8-second gap is the entire story. Your server is fine, your Dubai edge is fine, and all of the delay is bundle download, parse and execute against an empty HTML shell. Largest paint trails first paint by half a second, so it needs no separate fix.</p>
 
   <p>The bundle is 8.72&nbsp;MB across 199 resources, <strong>64.6% of it unused</strong> on first paint.</p>
 
   <div class="bars" id="bars"></div>
-  <p class="legend"><span><i style="background:var(--blue)"></i>executed on first paint</span><span><i style="background:var(--pad-sunk)"></i>downloaded, parsed, never executed</span></p>
+  <p class="legend"><span><i class="sw sw-used"></i>executed on first paint</span><span><i class="sw sw-unused"></i>downloaded, parsed, never executed</span></p>
 
-  <p>Your support chat widget outweighs your product. Underneath it sit three chunks with no business being on a login screen at all: a data grid at 459&nbsp;KB, 89% unused. An icon set at 392&nbsp;KB, 97% unused. A page shell at 333&nbsp;KB, 96% unused. So 1.21&nbsp;MB of authenticated application code goes out to every visitor who never logs in. For a form with two inputs and a button.</p>
+  <p>Your support chat widget outweighs your product. Underneath it sit three chunks with no business on a login screen: a data grid at 459&nbsp;KB, 89% unused; an icon set at 392&nbsp;KB, 97% unused; a page shell at 333&nbsp;KB, 96% unused. That is 1.21&nbsp;MB of authenticated application code shipped to every visitor who never logs in, for a form with two inputs and a button.</p>
 
-  <p>And 335&nbsp;ms of interaction latency on that form isn't your application logic. It's main-thread contention, which brings us to everything else that's loading.</p>
+  <p>The 335&nbsp;ms of interaction latency on that form is not your application logic. It is main-thread contention, which brings us to everything else loading alongside it.</p>
 
   <h3>Thirteen third-party tracking products on the authentication origin</h3>
 
-  <p>The cookies transmitted to the login page identify thirteen distinct third-party products: Meta, Google Analytics across three separate properties, Microsoft Clarity, Hotjar, HubSpot, Google Ads, Intercom, ContentSquare, Reddit Ads, Microsoft Bing UET, PostHog across two separate projects, Leadfeeder, and one unidentified vendor writing a <code>__ps_</code> cookie family. Google Sign-In is there too, but that is authentication rather than tracking, so I have left it out of the count. They are scoped to the parent domain, so the full paid-search attribution chain rides along onto the app origin. Campaign names, keyword terms, click identifiers.</p>
+  <p>The cookies transmitted to your login page identify thirteen distinct third-party products: Meta, Google Analytics across three properties, Microsoft Clarity, Hotjar, HubSpot, Google Ads, Intercom, ContentSquare, Reddit Ads, Microsoft Bing UET, PostHog across two projects, Leadfeeder, and one unidentified vendor writing a <code>__ps_</code> cookie family. Google Sign-In is there too, but that is authentication rather than tracking, so it is out of the count. They are scoped to the parent domain, so campaign names, keyword terms and click identifiers ride along onto the app origin.</p>
 
-  <p>Four of those offer DOM-level session replay. They record rendered content and form input. This is the origin that, one screen later, shows your customers' cardholder names, emails, masked card numbers, balances and transaction detail.</p>
+  <p>Four of them offer DOM-level session replay, recording rendered content and form input. This is the origin that, one screen later, shows your customers' cardholder names, emails, masked card numbers, balances and transaction detail.</p>
 
-  <p>There is no <code>Content-Security-Policy</code> header on that origin. You set HSTS. You set <code>nosniff</code>. You set <code>X-Frame-Options</code>, though CSP's frame-ancestors has superseded it. You set <code>X-XSS-Protection: 1; mode=block</code>, which current guidance says to turn off rather than on. The one policy that would constrain what those scripts may read, and where they may send it, is the one that's missing.</p>
+  <p>There is no <code>Content-Security-Policy</code> header on that origin. You set HSTS, you set <code>nosniff</code>, you set <code>X-Frame-Options</code>, which CSP's frame-ancestors has superseded, and you set <code>X-XSS-Protection: 1; mode=block</code>, which current guidance says to turn off rather than on. The one policy that would constrain what those scripts may read, and where they may send it, is the one that is missing.</p>
 
-  <p>Let me be exact about what I'm claiming, because this one matters. Exposure surface, not incident. Whether you've masked or disabled replay after login, I can't see from out here and I didn't go looking. What I can see is that the control which would enforce it isn't there. Only vendor configuration is, and configuration is one dashboard toggle from being something else.</p>
+  <p class="scope"><b>Exposure surface, not incident.</b> Whether you have masked or disabled replay after login I cannot see from out here, and I did not go looking. What I can see is that the control which would enforce it is not there. Only vendor configuration is, and configuration is one dashboard toggle from being something else.</p>
 </section>
 
 <section>
   <h2>The register</h2>
-  <p class="lede">Every claim on this page comes out of one file, source and status attached to each, so you can check any of them against your own systems. Nothing gets asserted in one spot and quietly contradicted somewhere else.</p>
+  <p class="lede">All thirty-three, with source and status attached to each, so you can check any of them against your own systems.</p>
+  <p class="hint">Select any row to open its evidence, impact and fix.</p>
 
   <div class="controls" id="controls"></div>
   <div id="register"></div>
@@ -292,27 +317,26 @@ keyset cursor    <i>no duplicate, no gap</i>          insert appears on a later 
 
 <section>
   <h2>What is working</h2>
-  <p class="lede">A study that only attacks isn't an audit. It's an audition for a grudge. Plenty of what you've built is done well, and a couple of things are done better than most teams manage.</p>
+  <p class="lede">A study that only attacks is not an audit. Plenty of what you have built is done well, and some of it better than most teams manage.</p>
   <div class="two" id="working"></div>
 </section>
 
 <section>
   <h2>What I could not determine</h2>
-  <p class="lede">Not findings. This is the edge of what public evidence establishes, written down so you can see exactly where I stopped. Most of these you can answer internally in minutes.</p>
+  <p class="lede">Not findings. This is the edge of what public evidence establishes, written down so you can see exactly where I stopped.</p>
   <div class="two" id="questions"></div>
 </section>
 
 <div class="close">
   <h2>The gap I'd want to work on</h2>
-  <p>One thing I kept circling that isn't in the register above, because it's a roadmap observation rather than a defect.</p>
-  <p>You already ship AI in production. Your marketing says receipt matching and WhatsApp receipt collection, and your API backs that up. <code>receipts</code> comes back as an array of URLs, and your guide documents <code>vendorTrn</code> as captured from the user-uploaded invoice. So there's an extraction pipeline running today, and a supplier's VAT registration number is coming out of a model.</p>
-  <p>What the API doesn't return is any confidence score, any flag separating a value a model extracted from a value a human typed, and any review state. From an integrator's side those two are indistinguishable. One of them feeds UAE FTA compliance.</p>
-  <p>That's not a bug, and nobody's shipped the wrong thing. It's the shape of the work your job ad describes. Eval sets, acceptance criteria for non-deterministic output, guardrails on what a model is trusted to assert about money. I'd want provenance on every extracted field, a confidence threshold that routes low-scoring extractions to human review instead of straight to the ledger, and an eval set built from real receipts so quality regressions show up before a customer's VAT return does.</p>
-  <p>Thirty-two findings. Eight things working. Four open questions. All of it from your documentation and your login screen, which is roughly a thousandth of what's visible from inside.</p>
+  <p>You already ship AI in production. Receipt matching, WhatsApp receipt collection, and an API that backs it up: <code>receipts</code> comes back as an array of URLs, and your guide documents <code>vendorTrn</code> as captured from the user-uploaded invoice. So a supplier's VAT registration number is coming out of a model today.</p>
+  <p>What the API does not return is any confidence score, any flag separating a value a model extracted from one a human typed, or any review state. From an integrator's side those are indistinguishable. One of them feeds UAE FTA compliance.</p>
+  <p>That is not a bug. It is the shape of the work your job ad describes: provenance on every extracted field, a confidence threshold routing low-scoring extractions to human review instead of straight to the ledger, and an eval set built from real receipts so quality regressions surface before a customer's VAT return does.</p>
+  <p>Thirty-three findings, eight things working, four open questions. All of it from your documentation and your login screen, which is roughly a thousandth of what is visible from inside.</p>
 </div>
 
 <footer>
-  Typeface and palette on this page are yours, read out of your production bundle: Inter, and the cream, gold and deep green your application actually ships. A public brand directory lists #25D366 for Qashio; that colour appears zero times in your code, because it's WhatsApp's. Correction red is mine, not yours.<br><br>Sources: your integration guide and OpenAPI specification, both public. Response headers and coverage profile of the unauthenticated login page. Chrome User Experience Report field data, 28-day window ending 13 September 2026. No authenticated access at any point.
+  The typeface and palette on this page are yours, read out of your production bundle: Inter, and the cream, gold and deep green your application actually ships. A public brand directory lists #25D366 for Qashio; that colour appears zero times in your code, because it's WhatsApp's. Correction red is mine.<br><br>Sources: your integration guide and OpenAPI specification, both public. Response headers and coverage profile of the unauthenticated login page. Chrome User Experience Report field data, 28-day window ending 13 September 2026. No authenticated access at any point.
 </footer>
 
 </div>
@@ -382,8 +406,8 @@ function render(){
   const list = active === "all" ? F : F.filter(f => f.sev === active || f.cat === active);
   const el = document.getElementById("register");
   if(!list.length){ el.innerHTML = '<p class="empty">Nothing in this category.</p>'; return; }
-  el.innerHTML = list.map(f => `
-    <details class="finding" data-sev="${f.sev}">
+  el.innerHTML = list.map((f, i) => `
+    <details class="finding" data-sev="${f.sev}"${i === 0 ? " open" : ""}>
       <summary data-mark="${MARK[f.sev]}">
         <span class="f-title">${esc(f.t)}</span>
         <span class="f-meta">${f.id} ${f.sev}</span>
@@ -453,11 +477,16 @@ const COV = [
   ["Apple Sign-In", 0.04, 26.5],
   ["Google Fonts", 0.03, 0]
 ];
-document.getElementById("bars").innerHTML = COV.map(([n,mb,used]) => `
+const barsEl = document.getElementById("bars");
+barsEl.innerHTML = COV.map(([n,mb,used]) => `
   <div class="bar">
     <div class="lab"><span>${n}</span><span>${mb.toFixed(2)} MB \u00b7 ${used.toFixed(0)}% used</span></div>
-    <div class="track"><div class="used" style="width:${used}%"></div><div class="hatch"></div></div>
+    <div class="track"><div class="used"></div><div class="hatch"></div></div>
   </div>`).join("");
+/* Widths go through the CSSOM, not a style attribute. A style-src hash covers
+   stylesheet elements only, never attributes, so an inline width here would be
+   blocked by this page's own CSP. The CSSOM is not subject to style-src. */
+barsEl.querySelectorAll(".used").forEach((el, i) => { el.style.width = COV[i][2] + "%"; });
 </script>
 </body>
 </html>
