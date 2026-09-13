@@ -1,0 +1,558 @@
+{
+  "meta": {
+    "subject": "Qashio ERP API (erp.qashio.com) + developers.qashio.com",
+    "method": "Passive review of publicly published documentation and the publicly linked OpenAPI 3.0 specification. No authenticated access. No requests issued against the API. No credentials held or sought. Front-end evidence is passive observation of the unauthenticated login page only: response headers, public bundle coverage, and Google's own field telemetry. No authenticated session, no account, no automated crawling.",
+    "spec_version": "Qashio ERP APIs 1.0 (OAS 3.0)",
+    "sources": {
+      "S1": "developers.qashio.com overview page, stamped 'Last updated 1 year ago'",
+      "S2": "developers.qashio.com generated API reference (api-connector section)",
+      "S3": "erp.qashio.com/api/docs \u2014 Swagger UI, OpenAPI 3.0 spec",
+      "S4": "Response headers, GET https://app.qashio.com/login, 12 Sep 2026 21:50:54 GMT, CloudFront PoP DXB53-P1",
+      "S5": "Chrome DevTools Coverage export, app.qashio.com/login, 13 Sep 2026 \u2014 199 resources, 8.72 MB JS/CSS",
+      "S6": "Chrome UX Report (CrUX) field data via PageSpeed Insights, app.qashio.com/login, mobile, 28-day period ending 13 Sep 2026",
+      "S7": "Swagger Schema tab (not Example Value), 200 response of GET /erp-transactions: FindAllResErpTransactionDto / FindAllResErpTransactionObjectDto, captured 13 Sep 2026."
+    },
+    "severity_scale": "critical = silently produces wrong financial data; high = breaks integration or forces incorrect client code; medium = operational or correctness risk under load or over time; low = quality signal, cheap to fix",
+    "status_values": "confirmed | hypothesis | open-question | private-disclosure | retracted",
+    "verification_pass": "Full adversarial re-verification, 13 Sep 2026. Integration guide re-fetched from source; all coverage figures re-derived from the raw export. Corrections: Intercom 4.33->4.44 MB and 9->10 files; first-party 3.84->3.93 MB; auth chunks 1.18->1.21 MB (earlier figures mixed MiB and MB, now decimal MB throughout); tracker count 14->13, Google Sign-In reclassified as functional authentication.",
+    "note_on_omission": "One open question is withheld from this public register. It concerns how request scope is established, it is a design question rather than a demonstrated flaw, and confirming it would have required testing against production. It was sent to Qashio privately, phrased as a question."
+  },
+  "retracted": [
+    {
+      "id": "QF-R01",
+      "title": "Transactions endpoints absent from OpenAPI spec",
+      "status": "retracted",
+      "theory": "The /erp-transactions endpoints appeared under an 'Erp Transactions' tag with no operations, suggesting the flagship endpoint was missing from the machine-readable contract and would be absent from any generated client.",
+      "why_retracted": "The Swagger UI accordion for that tag was collapsed at capture time. Both GET /erp-transactions and GET /erp-transactions/{id} are fully specified. The theory was an artifact of how the spec was captured, not a property of the spec.",
+      "note": "Recorded deliberately. A finding this severe was one collapsed UI element away from being published as fact."
+    }
+  ],
+  "findings": [
+    {
+      "id": "QF-01",
+      "title": "Integration guidance mandates two fields the API never returns",
+      "severity": "critical",
+      "category": "correctness",
+      "status": "confirmed",
+      "theory": "The documented contract for the amount posted to the general ledger does not match the served contract.",
+      "evidence": {
+        "S1": "Integration-Critical Notes state that billingCurrency should be used for all integrations as it represents the actual card account currency charged, and that billingAmount is the amount initially authorized on the card. Both are listed in the field table.",
+        "S3": "billingCurrency is accepted as a query parameter on GET /erp-transactions. billingAmount is NOT: the endpoint exposes transactionAmountFrom/To and vatAmountFrom/To but no billingAmount range filter, and the field appears nowhere else in the surface. Neither field appears in the 200 Example Value for GET /erp-transactions or GET /erp-transactions/{id}.",
+        "S7": "FindAllResErpTransactionObjectDto declares 54 properties. Neither billingAmount nor billingCurrency is among them. Confirmed against the declared DTO, not the rendered example."
+      },
+      "impact": "An integrator following the guide's most emphatic instruction reaches for two fields, one of which is absent from the response and the other absent from the entire API surface. The fallback is an undocumented choice between amount and transactionAmount (QF-02). This is the figure that becomes a general ledger entry.",
+      "fix": "Serialize billingAmount and billingCurrency in the transaction response, or remove them from both the filter set and the integration guidance and name the field that actually carries the settled charge.",
+      "verification": "Diff the set of documented field names in S1 against the response schema properties in S3.",
+      "evidence_quality": "CONFIRMED AT CONTRACT LEVEL. Originally established from Swagger's Example Value tab and flagged as weaker evidence; subsequently verified against the declared response DTO, which also omits both fields. One correction logged during review: an earlier draft stated both fields were accepted as query filters. That is true of billingCurrency only; billingAmount appears nowhere in the API surface."
+    },
+    {
+      "id": "QF-02",
+      "title": "Two undocumented amount fields with different values and no stated relationship",
+      "severity": "critical",
+      "category": "correctness",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "The transaction response carries amount: 102 with currency: 'USD', and transactionAmount: 102.5 with transactionCurrency: 'USD'. Same currency, different values.",
+        "S1": "The overview field table documents transactionAmount and transactionCurrency. It does not document amount or currency at all."
+      },
+      "impact": "Four amount-like fields exist across documentation and payload (amount, transactionAmount, billingAmount, feeCharges), and the example gives two different values in the same currency with no rule for which is authoritative. This is the number that becomes a GL entry.",
+      "fix": "Define one settled amount and one original amount with explicit names, document the invariant between them, and remove or alias the rest.",
+      "verification": "Response example in S3 versus field table in S1."
+    },
+    {
+      "id": "QF-03",
+      "title": "The only endpoint whose records mutate is the only one without delta-sync filters",
+      "severity": "critical",
+      "category": "operability",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "GET /erp-chart-of-accounts, /erp-suppliers, /erp-tax-rates and /erp-bank-accounts each accept updatedAtFrom and updatedAtTo. GET /erp-transactions accepts clearedAtFrom/To and transactionTimeFrom/To but neither updatedAtFrom nor updatedAtTo. The transaction response returns both updatedAt and modifiedDate."
+      },
+      "impact": "Master data, which rarely changes, supports incremental sync. Transactions, which mutate continuously as approvals complete, receipts attach, memos and segments are edited and erpSyncStatus advances, require a full re-scan to detect any change. The mutation timestamps are returned but not queryable.",
+      "fix": "Add updatedAtFrom/updatedAtTo to GET /erp-transactions, or preferably a monotonic cursor. See QF-04 for why a timestamp filter alone is insufficient.",
+      "verification": "Parameter lists of all five collection endpoints in S3."
+    },
+    {
+      "id": "QF-04",
+      "title": "Offset pagination over a mutating collection, at a page rate that guarantees drift",
+      "severity": "high",
+      "category": "operability",
+      "status": "confirmed",
+      "evidence": {
+        "S1": "Rate limit of 30 requests per minute per companyId. Default page size 10, maximum 500.",
+        "S3": "Pagination is page plus limit (ERP group) or page plus pageSize (card group). No cursor, no stable sort key documented."
+      },
+      "impact": "Offset pagination assumes a stable collection. A 100k-transaction company needs 200 sequential requests, roughly seven minutes at the documented rate limit, during which inserts shift the offset window and rows are skipped or duplicated. Combined with QF-03, the full scan is also the only sync mode available.",
+      "fix": "Keyset or cursor pagination on an immutable monotonic column, with the cursor opaque to the client.",
+      "verification": "Rate limit and pagination sections of S1 against parameter lists in S3."
+    },
+    {
+      "id": "QF-05",
+      "title": "Line items do not reconcile to the transaction header in the canonical example",
+      "severity": "high",
+      "category": "correctness",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "Transaction example: amount 102, transactionAmount 102.5, vatAmount 12. Its two lineItems: amount 120 and 120, vatAmount 14 and 14. Line totals 240 and 28 against header 102 and 12."
+      },
+      "impact": "Whether line items must sum to the header is the central invariant for splitting one card transaction across multiple GL codes. The published example answers no, and no invariant is stated anywhere. An integrator cannot tell whether a mismatch in production is legitimate data or a bug to alert on.",
+      "fix": "State the invariant explicitly and enforce it, or document that line items are an independent allocation layer and name the reconciliation rule.",
+      "verification": "Arithmetic on the S3 response example."
+    },
+    {
+      "id": "QF-06",
+      "title": "segments already contains custom segments, which customSegments then repeats",
+      "severity": "high",
+      "category": "correctness",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "The segments array includes entries labelled 'CustomSegment-Vender' and 'CustomSegment-Customer'. The customSegments array contains a duplicate of the first, with the same name, label and code."
+      },
+      "impact": "The field naming invites concatenating both arrays to build the full dimension set. Doing so double-counts every custom segment, which for line-level allocation means duplicated GL dimensions.",
+      "fix": "Make segments contain only standard segments, or make customSegments a view rather than a second copy. Document which is authoritative.",
+      "verification": "Compare array contents in the S3 transaction example."
+    },
+    {
+      "id": "QF-07",
+      "title": "Enum values do not round-trip, and fail inconsistently",
+      "severity": "high",
+      "category": "consistency",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "Request examples use lowercase (transactionCategory=card_loading, approvalStatus=pending, erpSyncStatus=pending, transactionStatus=draft, status=active, cardType=virtual). Responses return Pascal case for transactionCategory ('Purchase'), approvalStatus ('Pending'), erpSyncStatus ('Pending'), card status ('Active') and cardType ('Virtual') \u2014 but lowercase for transactionStatus ('draft'). Statements introduce a third convention with accountType values Card, PoolAccount, Subsidiary, CompanyFundAccount.",
+        "S1": "The same category enum is documented in upper snake case: CARD_LOADING, PURCHASE, CASH_WITHDRAWAL. One entry is written 'FORCED DEBIT' with a space rather than an underscore."
+      },
+      "impact": "Feeding back a value you just received returns zero results with no error. Three of four transaction enums break on round-trip and one works, so the failure is not learnable from a single test. Three separate casings exist for the same concept across documentation and API.",
+      "fix": "One canonical casing, case-insensitive matching on input, and a declared enum in the spec for every one of these fields.",
+      "verification": "Parameter examples versus response examples in S3, cross-referenced with the category table in S1."
+    },
+    {
+      "id": "QF-08",
+      "title": "Two different response envelope shapes across the same API",
+      "severity": "high",
+      "category": "contract",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "The ERP group (chart-of-accounts, suppliers, tax-rates, bank-accounts, transactions) returns the pagination envelope wrapped in an array: [{page, totalPages, total, data: [...]}]. The card group (cards, pool-accounts, statements) returns it bare: {page, totalPages, total, data: [...]}."
+      },
+      "impact": "A client must write response[0].data for one half of the API and response.data for the other, with no signal in the path or tag as to which applies. The array wrapper around a single object is almost certainly unintentional and is now part of the published contract.",
+      "fix": "Unwrap the ERP group to the bare envelope. Version the change or gate it behind an Accept header.",
+      "verification": "Response schemas across all seven collection endpoints in S3."
+    },
+    {
+      "id": "QF-09",
+      "title": "No authentication or rate-limit failure responses are specified anywhere",
+      "severity": "high",
+      "category": "contract",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "Every endpoint requires companyId and x-api-key headers. The ERP group documents only 200 and 400. The card group documents only 200. No endpoint declares 401, 403 or 429.",
+        "S1": "A rate limit of 30 requests per minute per companyId is documented in prose only."
+      },
+      "impact": "A generated client gets typed handling for the one failure mode that will not dominate production and none for the three that will: bad key, wrong company scope, and throttling. No Retry-After contract is specified, so back-off is guesswork.",
+      "fix": "Declare 401, 403 and 429 on every operation, with a consistent error body and a documented Retry-After header on 429.",
+      "verification": "Responses section of every operation in S3."
+    },
+    {
+      "id": "QF-10",
+      "title": "feeCharges carries no currency and no inclusion semantics",
+      "severity": "high",
+      "category": "correctness",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "The transaction response returns feeCharges: 2.75 with no accompanying currency field and no documentation.",
+        "S1": "feeCharges does not appear in the overview field table at all."
+      },
+      "impact": "Undocumented whether the fee is denominated in the transaction currency or the card account currency, and whether it is included in or additional to the amount fields. On cross-border spend this is the FX markup, and getting it wrong misstates both expense and VAT recoverable.",
+      "fix": "Add feeCurrency, document inclusion semantics, and break out fee components if more than one applies.",
+      "verification": "Presence in S3 response schema, absence in S1 field table."
+    },
+    {
+      "id": "QF-11",
+      "title": "Monetary values serialized as bare JSON numbers",
+      "severity": "medium",
+      "category": "correctness",
+      "status": "confirmed",
+      "evidence": {
+        "S1": "Amount fields are typed Decimal.",
+        "S3": "Examples serialize them as unquoted JSON numbers: 102, 102.5, 2.75, 77.14."
+      },
+      "impact": "JSON has no decimal type. Most parsers route unquoted numbers through IEEE-754 doubles, so a value typed Decimal server-side arrives as binary floating point client-side. Standard practice for money is minor-unit integers or decimal strings.",
+      "fix": "Serialize money as strings, or as integer minor units with an explicit exponent.",
+      "verification": "Type declarations in S1 versus serialization in S3 examples."
+    },
+    {
+      "id": "QF-12",
+      "title": "Redundant identity and state pairs throughout the transaction model",
+      "severity": "medium",
+      "category": "contract",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "The transaction response carries both id and qashioId, both parentId and parentQashioId, both status and transactionStatus (both 'draft'), both updatedAt and modifiedDate, and three timestamps in transactionTime, transmissionDateTime and clearedAt. Also visible and excludeFromSync, two booleans governing whether a record is surfaced.",
+        "S1": "Documents id as 'Internal to Qashio - Ignore for Integrations', documents parentId as the reversal linkage field, and does not mention parentQashioId, clearedAt, modifiedDate, status, visible or transmissionDateTime."
+      },
+      "impact": "The overview tells integrators to ignore id while naming parentId, a GUID that references id, as the only documented way to link a reversal to its original. The spec shows parentQashioId exists and solves this. Duplicate state pairs can disagree and no precedence is documented.",
+      "fix": "Deprecate the internal UUID from the public surface, expose parentQashioId as the documented linkage, and collapse each duplicate state pair to one field.",
+      "verification": "Field-by-field diff of S1 table against S3 response schema."
+    },
+    {
+      "id": "QF-13",
+      "title": "Pagination parameter names differ between endpoint groups",
+      "severity": "medium",
+      "category": "consistency",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "ERP group uses page plus limit with default 10. Card group uses page plus pageSize with default 20. Statements uses pageSize with default 20 on the collection and 12 on the detail endpoint."
+      },
+      "impact": "Passing the wrong parameter name is silently ignored and returns the default page size rather than erroring, so the bug surfaces as missing data rather than a failed request.",
+      "fix": "One parameter name across the API. Reject unknown query parameters rather than ignoring them.",
+      "verification": "Parameter lists across all collection endpoints in S3."
+    },
+    {
+      "id": "QF-14",
+      "title": "Duplicated and overlapping configuration objects on cards and pool accounts",
+      "severity": "medium",
+      "category": "contract",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "GET /cards/{cardId} returns both topupConfiguration and autoTopUpConfiguration, overlapping in autoTopupEnabled, autoTopupAmount and frequency, with the second adding autoTopupThreshold. Note the inconsistent casing of TopUp between the two key names. It also returns atmWithdrawalAllowed at the top level and again inside atmConfiguration. GET /pool-accounts/{id} returns both topupConfiguration and balanceAndTopupConfiguration, plus lowBalanceNotificationActive/Amount at top level alongside lowBalanceAlertConfiguration."
+      },
+      "impact": "Reads as a half-finished migration frozen into the public contract. Two representations of one piece of state can disagree, and no precedence is documented.",
+      "fix": "Pick the newer nested representation, deprecate the flat duplicates with a sunset date, and remove the older config object.",
+      "verification": "Response schemas of the two detail endpoints in S3."
+    },
+    {
+      "id": "QF-15",
+      "title": "Company summary reports five balances with no timestamp and undefined multi-currency semantics",
+      "severity": "medium",
+      "category": "correctness",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "GET /company/summary returns companyFundingBalance, poolAccountsBalance, cardsBalance, subsidiariesBalance and companyBalance under a single top-level currency, with no asOf timestamp. Cards carry their own cardCurrency and pool accounts their own currency."
+      },
+      "impact": "No stated invariant between the four component balances and companyBalance. No point-in-time anchor, so two calls seconds apart are not comparable and neither is auditable. Where component accounts are denominated in other currencies, the conversion rate and its timestamp are undefined.",
+      "fix": "Add asOf, state the summation invariant, and either return per-currency breakdowns or document the rate source and as-of time used for conversion.",
+      "verification": "Response schema of /company/summary in S3."
+    },
+    {
+      "id": "QF-16",
+      "title": "No push delivery; polling is the only integration mode",
+      "severity": "medium",
+      "category": "operability",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "The spec exposes GET operations only. No webhook registration, no subscription endpoint, no event resource.",
+        "S1": "Rate limit of 30 requests per minute per companyId."
+      },
+      "impact": "Combined with QF-03 and QF-04, freshness is bounded by full-scan duration. Marketing describes real-time visibility and automated reconciliation; the integration surface supports neither without polling pressure.",
+      "fix": "Signed webhooks for transaction lifecycle events, with replay and an at-least-once delivery contract.",
+      "verification": "Complete operation list in S3."
+    },
+    {
+      "id": "QF-17",
+      "title": "Declines are not exposed, and the field that would carry them is absent from the response",
+      "severity": "medium",
+      "category": "coverage",
+      "status": "confirmed",
+      "evidence": {
+        "S1": "statusCode is documented as always '0000', with the note that unsuccessful transactions are already filtered out.",
+        "S3": "statusCode does not appear in the transaction response schema at all."
+      },
+      "impact": "Declined transactions are the highest-volume support event for a corporate card programme and are invisible through the API, so no customer-side tooling can be built on them. Separately, the documented field does not exist in the served payload.",
+      "fix": "Expose declines with network response codes behind an explicit filter defaulting to approved-only, preserving current behaviour for existing clients.",
+      "verification": "S1 field table versus S3 response schema."
+    },
+    {
+      "id": "QF-18",
+      "title": "Overview documentation has drifted a year behind the served contract",
+      "severity": "medium",
+      "category": "documentation",
+      "status": "confirmed",
+      "evidence": {
+        "S1": "Page is stamped 'Last updated 1 year ago'. It omits clearedAt, clearingStatus, mccCode, mccDescription, merchantCity, merchantCountry, feeCharges, syncErrors, erpSyncStatus, erpSyncType, approvedBy, approvedDateTime, chartOfAccountNumber, employeeId, transactionMode, messageType, transmissionDateTime, parentQashioId, visible, status, createdAt, updatedAt and modifiedDate \u2014 all present in S3.",
+        "S3": "All of the above appear in the response schema."
+      },
+      "impact": "The overview is the entry point and the only narrative guidance that exists. Integrators build against it and inherit QF-01, QF-02, QF-12 and QF-17 as a direct consequence. This is the root cause behind several other findings rather than a separate defect.",
+      "fix": "Generate the field reference from the OpenAPI spec so drift is structurally impossible, and keep the hand-written page to narrative guidance only.",
+      "verification": "Full field diff, S1 against S3."
+    },
+    {
+      "id": "QF-19",
+      "title": "No lookup by the identifier the documentation designates as public",
+      "severity": "medium",
+      "category": "contract",
+      "status": "confirmed",
+      "evidence": {
+        "S1": "qashioId is documented as the immutable transaction reference number used to uniquely identify each transaction, and is the identifier shown on the web dashboard. id is documented as internal and to be ignored.",
+        "S3": "GET /erp-transactions/{id} takes the internal UUID as its path parameter. qashioId is available only as a query filter on the collection endpoint."
+      },
+      "impact": "The identifier a finance user can actually see, and the one the docs designate as the stable public reference, cannot be used to fetch a record directly. Retrieval by the visible identifier requires a filtered collection call and unwrapping a single-element array inside an array, per QF-08.",
+      "fix": "Accept qashioId on the detail path, or add GET /erp-transactions/by-qashio-id/{qashioId}.",
+      "verification": "Path parameter definitions in S3 against identifier guidance in S1."
+    },
+    {
+      "id": "QF-20",
+      "title": "Boolean filters typed as strings, inconsistently",
+      "severity": "low",
+      "category": "contract",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "isDeleted is declared as a string with values true and false on chart-of-accounts, suppliers, tax-rates and bank-accounts, while the corresponding response field is a boolean. reconciliationAccount on bank-accounts is likewise a string. excludeFromSync on transactions is correctly declared boolean."
+      },
+      "impact": "Generated clients produce string-typed parameters for boolean concepts on four endpoints and a proper boolean on the fifth, so the same concept has two shapes in one SDK.",
+      "fix": "Declare all boolean filters as boolean.",
+      "verification": "Parameter type declarations in S3."
+    },
+    {
+      "id": "QF-21",
+      "title": "Copy-paste errors in response descriptions and example data",
+      "severity": "low",
+      "category": "documentation",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "Response description 'Returns all ERP Suppliers' appears on /erp-tax-rates, /erp-bank-accounts and /erp-transactions. 'Returns a ERP Supplier' appears on the detail endpoints for tax-rates, bank-accounts and transactions. accountType is spelled 'Assest' in both chart-of-accounts examples. The card example is simultaneously status 'Active', activatedAt null and terminatedAt populated. erp_internal_id is snake_case inside otherwise camelCase objects. The same concept is keyed code on transaction customSegments and erpCode on card customSegments."
+      },
+      "impact": "Individually trivial. Collectively they indicate the spec is generated but not reviewed, which is the same mechanism that produced QF-08 and QF-09.",
+      "fix": "Spec linting in CI, with the rules in this register as the initial rule set.",
+      "verification": "Direct reading of S3."
+    },
+    {
+      "id": "QF-22",
+      "title": "Raw ISO 8583 message type exposed without an enum",
+      "severity": "low",
+      "category": "contract",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "The transaction response returns messageType: 'MTI123', which is not a valid MTI. No enum or description is provided.",
+        "S1": "The AFT category description states that it represents a purchase or a reversal depending on the messageType, making the field semantically load-bearing."
+      },
+      "impact": "An accounting-facing API leaks switching-layer detail that integrators are told to branch on, with no documented value set and a placeholder example.",
+      "fix": "Either document the MTI value set or derive the distinction server-side and expose it as a typed category.",
+      "verification": "Response schema in S3 against the AFT row in the category table in S1."
+    },
+    {
+      "id": "QF-23",
+      "title": "syncErrors returned with no schema",
+      "severity": "low",
+      "category": "contract",
+      "status": "confirmed",
+      "evidence": {
+        "S3": "The transaction response includes syncErrors as an empty array in every example. No item schema is declared and the field is absent from S1."
+      },
+      "impact": "The field that reports why a transaction failed to reach the customer's ERP has no documented shape, so no client can parse it without observing production data.",
+      "fix": "Declare the item schema with a stable error code, a human-readable message and a timestamp.",
+      "verification": "Response schema in S3."
+    },
+    {
+      "id": "QF-30",
+      "title": "No Content-Security-Policy on the authentication origin",
+      "severity": "critical",
+      "category": "security",
+      "status": "confirmed",
+      "evidence": {
+        "S4": "Response headers on app.qashio.com/login include strict-transport-security (max-age=31536000; includeSubDomains), x-content-type-options: nosniff, x-frame-options: SAMEORIGIN and x-xss-protection: 1; mode=block. There is no content-security-policy header, no permissions-policy, no cross-origin-opener-policy and no server-set referrer-policy."
+      },
+      "impact": "CSP is the primary control limiting which scripts may execute and where data may be sent on an origin. Its absence on the login origin of a corporate card platform means no technical restriction on script sources, inline execution, or exfiltration destinations. The two headers that are present are legacy: x-frame-options is superseded by CSP frame-ancestors, and x-xss-protection is deprecated, with current guidance to send 0 rather than 1; mode=block because the auditor it enables has introduced vulnerabilities of its own. Their presence alongside CSP's absence suggests a copied header block rather than a reviewed policy.",
+      "fix": "Ship CSP in Report-Only first to gather violations without breaking the page, tighten to enforcing with explicit script-src and connect-src allowlists, add frame-ancestors, then set Permissions-Policy and Cross-Origin-Opener-Policy. COOP matters here specifically because Google Sign-In popup flows are in use.",
+      "verification": "Header list in S4."
+    },
+    {
+      "id": "QF-31",
+      "title": "Thirteen third-party tracking products on the authentication origin, four of them session recorders",
+      "severity": "critical",
+      "category": "privacy",
+      "status": "confirmed",
+      "evidence": {
+        "S4": "Cookie header identifies Meta (_fbp), Google Analytics (3 properties), Microsoft Clarity (_clck/_clsk), Hotjar, HubSpot, Google Ads (_gcl_*), Intercom, ContentSquare (_cs_*), Reddit Ads (_rdt_*), Microsoft Bing UET (_uetsid/_uetvid), PostHog (2 projects), Leadfeeder (_lfa), and an unidentified __ps_ family. Google Sign-In (g_state) excluded as functional authentication. Parent-domain scoped, carrying gclid, campaign names and keyword terms onto the app origin."
+      },
+      "impact": "Clarity, Hotjar, ContentSquare and PostHog all offer DOM-level session replay, which captures rendered content and form input. This origin, once authenticated, renders cardholder names, emails, masked card numbers, balances and transaction detail. Whether replay is disabled or masked post-login cannot be determined from outside, which is precisely the problem: combined with QF-30, there is no technical control preventing any of these scripts from reading the authenticated DOM, only vendor configuration. Three separate GA properties and two separate PostHog projects also suggest accumulated tooling nobody has audited.",
+      "fix": "Split the origin: keep marketing and attribution tooling on the marketing domain and admit only what is operationally required onto the app origin. Scope analytics cookies to the specific host rather than the parent domain. Enforce masking policy in code rather than vendor dashboards, and gate it with CSP connect-src so an accidental re-enable cannot transmit.",
+      "verification": "Cookie header in S4, cross-referenced with bundle fingerprints in S5.",
+      "note": "Stated as an exposure-surface and governance finding. No claim is made that replay is currently capturing cardholder data; that is not observable without authenticated access and was not tested."
+    },
+    {
+      "id": "QF-32",
+      "title": "The support chat widget outweighs the entire first-party application",
+      "severity": "high",
+      "category": "performance",
+      "status": "confirmed",
+      "evidence": {
+        "S5": "8.72 MB across 199 resources, 64.6% unused on first paint. Intercom 4.44 MB across 10 files (43.6% used); first-party 3.93 MB across 185 files (26.5% used). Third-party 54.9% of all bytes. Decimal MB (bytes/1e6), re-derived from the raw export."
+      },
+      "impact": "A visitor to the login screen downloads more JavaScript for the support widget than for the product. Intercom is not needed before authentication and is not needed at all until the user opens it.",
+      "fix": "Lazy-load Intercom on user intent rather than page load, and exclude it from the unauthenticated route entirely. This is the single largest available byte reduction and requires no application refactor.",
+      "verification": "Per-domain aggregation in S5."
+    },
+    {
+      "id": "QF-33",
+      "title": "Authenticated application code is shipped to unauthenticated visitors",
+      "severity": "high",
+      "category": "performance",
+      "status": "confirmed",
+      "evidence": {
+        "S5": "GridTable 458.9 KB at 89.0% unused, Icons 392.3 KB at 97.1% unused, Page 333.4 KB at 95.8% unused, totalling 1.21 MB. 125 of 185 first-party files under 5 KB."
+      },
+      "impact": "Roughly 1.2 MB of post-authentication surface is delivered to every visitor who never logs in, including bots and scrapers. This is the dominant controllable contributor to the FCP gap in QF-34, and it also means the shape of the authenticated interface is enumerable from outside.",
+      "fix": "Route-level code splitting with the authenticated shell behind a dynamic import gated on session state. A data-grid component and a full icon set should never be in the login route's dependency graph.",
+      "verification": "Per-file coverage in S5."
+    },
+    {
+      "id": "QF-34",
+      "title": "Core Web Vitals failing in field data, with the bottleneck provably client-side",
+      "severity": "high",
+      "category": "performance",
+      "status": "confirmed",
+      "evidence": {
+        "S6": "Core Web Vitals Assessment: Failed. LCP 3.0 s, INP 335 ms, CLS 0.04, FCP 2.5 s, TTFB 0.7 s. Mobile, 28-day field data from real Chrome users.",
+        "S4": "The document is a static HTML shell served through CloudFront, with etag and last-modified present and cache-control: no-cache, no-store, must-revalidate.",
+        "S5": "React 18 with createRoot, built by Vite, rendering client-side. No server-rendered markup fingerprint."
+      },
+      "impact": "TTFB of 0.7 s against FCP of 2.5 s means 1.8 seconds elapse between the first byte arriving and anything appearing on screen. The server and the Dubai edge are doing their job; the delay is entirely bundle download, parse and execute against an empty HTML shell. LCP trails FCP by only 0.5 s, so LCP is gated by FCP and needs no separate fix. CLS at 0.04 is genuinely good. INP of 335 ms on a form with two inputs and a button is not caused by application logic; it indicates main-thread contention, consistent with the third-party load in QF-31 and QF-32.",
+      "fix": "Ordered by measured yield: defer Intercom (QF-32, ~3.4 MB), gate authenticated chunks (QF-33, ~1.2 MB), defer non-essential analytics past interactive (addresses INP), then consider server-rendering or prerendering the login route to eliminate the empty-shell penalty outright.",
+      "verification": "S6 field metrics against S4 and S5. Note this is CrUX field data from real users, not a synthetic lab run, so it reflects actual customer experience."
+    },
+    {
+      "id": "QF-35",
+      "title": "Legacy date and utility libraries shipped in full",
+      "severity": "medium",
+      "category": "performance",
+      "status": "confirmed",
+      "evidence": {
+        "S5": "moment-Cb4qLRHv.js at 59 KB (74.5% unused) with locale data present, and lodash-BOrJCwl2.js at 69 KB (73.5% unused), both as separate first-party chunks."
+      },
+      "impact": "Moment has been in maintenance mode for years and its own maintainers recommend against it for new work; its locale bundle is the classic dead-weight case. Both are largely unused on the measured route.",
+      "fix": "Replace moment with date-fns or Temporal, and lodash with per-method imports or native equivalents. Low risk, mechanical, and well suited to agent-assisted refactoring with tests defining correctness.",
+      "verification": "Per-file coverage in S5."
+    },
+    {
+      "id": "QF-36",
+      "title": "Login shell marked no-store, forcing an origin fetch on every visit",
+      "severity": "low",
+      "category": "performance",
+      "status": "confirmed",
+      "evidence": {
+        "S4": "cache-control: no-cache, no-store, must-revalidate on the document, alongside etag W/\"6aa40335-3f04\" and last-modified. x-cache: Miss from cloudfront."
+      },
+      "impact": "The ETag and Last-Modified headers indicate revalidation was intended, but no-store forbids storing the response at all, so revalidation can never occur and the CDN cannot serve it. Every login page view is a full origin fetch. This contributes to TTFB but is not the dominant cost.",
+      "fix": "Use no-cache alone, which permits storage with mandatory revalidation and lets the ETag do its job. Reserve no-store for responses containing sensitive data; a static login shell is not one.",
+      "verification": "Cache and CDN headers in S4."
+    },
+    {
+      "id": "QF-24",
+      "title": "Optional fields declared required, including fields that cannot exist yet",
+      "severity": "critical",
+      "category": "contract",
+      "status": "confirmed",
+      "evidence": {
+        "S7": "In FindAllResErpTransactionObjectDto, 52 of 54 properties are marked required. Only parentId and parentQashioId are optional. Required fields include memo (free-text user note), purchaseOrderNumber, vendorTrn (OCR-extracted from an uploaded receipt), approvedDateTime, approvedBy, clearedAt, chartOfAccountNumber, erpSupplierName, erpSupplierRemoteId, poolAccountName, mccDescription and feeCharges. The same example marks approvalStatus as 'Pending' while approvedDateTime is required and populated."
+      },
+      "impact": "These fields are structurally absent for large classes of transaction. A transaction cannot have an approver before approval, a clearing timestamp before settlement, or an OCR-extracted tax number with no receipt attached. Either the API returns null for fields the contract declares mandatory, which makes the contract unreliable, or a generated client types them non-nullable and every consumer omits null handling. In TypeScript that produces code which compiles, passes review, and throws on the first transaction without a memo. This is worse than an undocumented field because tooling actively converts it into a runtime failure.",
+      "fix": "Audit nullability per field against real data and mark genuinely optional fields optional. In NestJS this is @ApiPropertyOptional or @ApiProperty({ required: false, nullable: true }). Assert the resulting contract in integration tests so drift is caught in CI.",
+      "verification": "Required markers in the Schema tab, cross-referenced against the lifecycle semantics of each field."
+    },
+    {
+      "id": "QF-25",
+      "title": "Six payload fields declared with no item type, including line items and segments",
+      "severity": "high",
+      "category": "contract",
+      "status": "confirmed",
+      "evidence": {
+        "S7": "approvedBy is declared as an empty object schema with an attached example. syncErrors, receipts, segments, customSegments and lineItems are declared as bare arrays with no item schema. Each carries an example but no type.",
+        "S3": "The 400 response is likewise declared as an empty object with an attached example."
+      },
+      "impact": "A generated client types all six as any or any[]. These are not peripheral fields: lineItems carries the GL allocation, segments and customSegments carry accounting dimensions, syncErrors reports why a transaction failed to reach the customer's ERP, and receipts carries the document URLs. The type safety the specification appears to provide is absent precisely where the accounting data is. The pattern is consistent with @ApiProperty declarations that supply an example but omit type.",
+      "fix": "Declare DTOs for each nested shape and reference them with @ApiProperty({ type: () => LineItemDto, isArray: true }). The spec already defines StandardSegmentDto and CustomSegmentDto in its schema list; they are simply not referenced from the transaction response.",
+      "verification": "Schema tab for the 200 response, plus the schema list at the foot of the specification."
+    },
+    {
+      "id": "QF-26",
+      "title": "The guide defines billingAmount two different ways on the same page",
+      "severity": "critical",
+      "category": "documentation",
+      "status": "confirmed",
+      "evidence": {
+        "S1": "Field table: billingAmount, Decimal, 'Amount charged to card in Local (Card Account) Currency', sample 77.14. Integration-Critical Notes, same page: 'billingAmount is the amount initially authorized on the card.'"
+      },
+      "impact": "Charged and authorised are different numbers, diverging on FX movement between authorisation and clearing, tips, partial captures, and hotel, car-rental and fuel pre-authorisations. Two integrators reading two sections of one document post two different figures. Compounds QF-01, where the field is absent from the contract entirely.",
+      "fix": "One definition, stated once. If both concepts are required, name and return them separately.",
+      "verification": "Direct reading of developers.qashio.com, re-fetched 13 Sep 2026."
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "QF-Q01",
+      "title": "Receipt URL access control",
+      "status": "open-question",
+      "evidence": "S3 returns receipts as an array of absolute URLs, exemplified as https://example.com/receipt1.jpg. S1 describes them as URLs to user-uploaded receipt and invoice attachments.",
+      "question": "Are these signed and time-limited, or long-lived and unauthenticated? Receipts carry supplier VAT registration numbers, amounts and line detail.",
+      "resolution_path": "Ask Qashio directly. Not testable without authenticated access, and will not be tested.",
+      "handling": "Stated as a question in the case study. No claim made either way."
+    },
+    {
+      "id": "QF-Q04",
+      "title": "Production stack differs from the stack in the job description",
+      "status": "open-question",
+      "evidence": "The role specifies React, Next.js and TypeScript on the front end. S5 shows app.qashio.com is a client-rendered Vite and React 18 SPA with MUI. No Next.js fingerprint is present in any of the 185 first-party files.",
+      "question": "Is Next.js used on a surface not observable from the login page, is a migration underway, or does the requirement describe where the team intends to go rather than where it is?",
+      "handling": "Raised as a question, not a discrepancy. The answer is interesting either way, and if a Next.js migration is planned it makes QF-34 a migration outcome rather than a separate fix."
+    },
+    {
+      "id": "QF-Q03",
+      "title": "Do amounts update on clearing?",
+      "status": "open-question",
+      "evidence": "The DTO declares amount, transactionAmount, clearedAt and clearingStatus, with no field named for a settled amount. Semantics for amount versus transactionAmount are published nowhere.",
+      "question": "Does either amount change between authorisation and clearing, or do both remain at authorisation values with clearing tracked by status alone?",
+      "significance": "Determines whether QF-01 and QF-02 are a documentation and contract defect, now confirmed, or that plus a settlement modelling gap.",
+      "resolution_path": "Requires authenticated observation across the settlement boundary, or a direct answer from Qashio. Not available from public evidence."
+    }
+  ],
+  "pending_evidence": [
+    "Review corpus: App Store, Google Play, G2, Trustpilot, Capterra \u2014 themes cross-coded against confirmed findings",
+    "Store-listing metadata only (version history, release cadence, privacy labels) \u2014 no device install",
+    "Marketing claims versus shipped capability (AI receipt matching, WhatsApp receipts, multi-entity, Corporate Travel)",
+    "AI provenance gap: receipts and vendorTrn extraction confidence, review status and audit trail (see role's AI-in-product scope)"
+  ],
+  "what_is_working": [
+    {
+      "id": "QW-01",
+      "observation": "No source maps exposed in production",
+      "evidence": "S5: 0 of 185 first-party files reference a sourceMappingURL.",
+      "note": "Correctly configured. A common and avoidable leak on React SPAs."
+    },
+    {
+      "id": "QW-02",
+      "observation": "HSTS with includeSubDomains",
+      "evidence": "S4: strict-transport-security max-age=31536000; includeSubDomains. Only preload is absent."
+    },
+    {
+      "id": "QW-03",
+      "observation": "X-Content-Type-Options: nosniff set",
+      "evidence": "S4."
+    },
+    {
+      "id": "QW-04",
+      "observation": "CLS of 0.04 in field data",
+      "evidence": "S6. Comfortably within the good threshold of 0.1, and notably better than typical for a client-rendered SPA. Layout stability is being handled well."
+    },
+    {
+      "id": "QW-05",
+      "observation": "Edge presence in-region",
+      "evidence": "S4: CloudFront PoP DXB53-P1. TTFB of 0.7 s in S6 confirms delivery infrastructure is not the bottleneck."
+    },
+    {
+      "id": "QW-06",
+      "observation": "Sentry present in the bundle",
+      "evidence": "S5 fingerprint. Production error monitoring is in place."
+    },
+    {
+      "id": "QW-07",
+      "observation": "Filter surface on GET /erp-transactions is genuinely rich",
+      "evidence": "S3: 25 query parameters covering category, sync and approval status, card, employee, chart-of-account, tax rate, VAT and amount ranges, both currencies, cardholder, and two time ranges. Where the API is good, it is good \u2014 the defects are consistency and contract, not capability."
+    },
+    {
+      "id": "QW-08",
+      "observation": "Modern toolchain",
+      "evidence": "S5: React 18 with createRoot, Vite build, MUI. Fine-grained chunking already exists; it is misaligned to routes rather than absent."
+    }
+  ]
+}

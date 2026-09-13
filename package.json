@@ -1,0 +1,9 @@
+{
+  "name": "qashio-audit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Public-evidence audit of Qashio's ERP API and web application.",
+  "scripts": {
+    "test": "node --test verify.mjs"
+  }
+}

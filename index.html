@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qashio product audit, a case study in verification</title>
+<meta name="description" content="A forensic review of Qashio's ERP API and web application, built from public evidence only. Thirty findings, eight things working, four open questions, and one retracted theory.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Palette and typeface taken from Qashio's own production bundle, not from a
+   brand directory. The directory listed #25D366, WhatsApp green, which appears
+   zero times in their application. Inter 400/500/600/700/900 is the literal
+   font request their app makes. */
+:root{
+  --cream:#FAF7EF;        /* ground */
+  --cream-deep:#F3ECDA;   /* panels */
+  --cream-sunk:#ECDEBC;   /* sunken tracks */
+  --ink:#1A1918;
+  --ink-mid:#212124;
+  --ink-soft:#636576;     /* their most-used text grey, 83 occurrences */
+  --gold:#A78F65;
+  --gold-soft:#D8C294;
+  --green:#052C18;        /* their deep green */
+  --red:#9E2A1F;          /* correction ink. deliberately NOT theirs. */
+  --measure:36rem;
+  --gutter:clamp(1.25rem,4vw,3rem);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--cream);color:var(--ink);
+  font-family:"Inter",system-ui,sans-serif;
+  font-size:16.5px;line-height:1.62;letter-spacing:-.005em;
+  font-feature-settings:"cv05","ss01";
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:repeating-linear-gradient(to bottom,transparent 0 31px,rgba(167,143,101,.07) 31px 32px);
+}
+.wrap{position:relative;z-index:1;max-width:64rem;margin:0 auto;padding:0 var(--gutter)}
+p{margin:0 0 1.05em;max-width:var(--measure)}
+a{color:var(--green);text-underline-offset:.18em;text-decoration-thickness:.06em}
+a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--red);outline-offset:3px}
+code,.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.84em;font-variant-ligatures:none}
+code{background:var(--cream-deep);padding:.1em .34em;border-radius:2px}
+strong{font-weight:600}
+
+.masthead{padding:2.2rem 0 0;display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;font-size:.85rem;color:var(--ink-soft)}
+.masthead b{font-weight:600;color:var(--ink)}
+
+.hero{padding:clamp(3rem,9vw,6.5rem) 0 clamp(2.5rem,6vw,4rem);border-bottom:1px solid var(--gold-soft)}
+.hero h1{
+  font-size:clamp(2.15rem,6vw,4.3rem);font-weight:900;line-height:.99;
+  letter-spacing:-.045em;margin:0 0 1.7rem;max-width:16ch;
+}
+.claim{
+  font-size:clamp(1.25rem,3.2vw,1.95rem);line-height:1.3;font-weight:400;
+  color:var(--ink-soft);position:relative;display:inline;max-width:26ch;
+}
+.claim .strike{position:relative;display:inline}
+.claim .strike::after{
+  content:"";position:absolute;left:-.06em;right:-.06em;top:.54em;height:2.5px;
+  background:var(--red);transform:scaleX(0);transform-origin:left center;
+  animation:strike 900ms cubic-bezier(.2,.7,.3,1) 700ms forwards;
+}
+@keyframes strike{to{transform:scaleX(1)}}
+.verdict{margin:1.5rem 0 0;font-size:1rem;color:var(--red);border-left:2.5px solid var(--red);padding-left:1rem;max-width:38rem}
+.verdict b{font-weight:600}
+.standfirst{margin-top:2.4rem;font-size:1.1rem;max-width:38rem;color:var(--ink)}
+
+.tally{display:flex;flex-wrap:wrap;gap:0 2.6rem;padding:1.6rem 0;border-bottom:1px solid var(--gold-soft);font-size:.92rem}
+.tally div{display:flex;align-items:baseline;gap:.5rem}
+.tally .n{font-size:1.75rem;font-weight:600;line-height:1;letter-spacing:-.03em}
+.tally .rt .n{color:var(--red)}
+.tally .ok .n{color:var(--green)}
+
+section{padding:clamp(3rem,7vw,5rem) 0;border-bottom:1px solid var(--gold-soft)}
+h2{font-size:clamp(1.45rem,3.2vw,2rem);font-weight:600;letter-spacing:-.032em;line-height:1.14;margin:0 0 1.4rem;max-width:24ch}
+h3{font-size:1.05rem;font-weight:600;letter-spacing:-.02em;margin:2.2rem 0 .6rem;max-width:var(--measure)}
+.lede{font-size:1.06rem;max-width:38rem}
+
+.exhibit{margin:1.8rem 0;border-top:1px solid var(--gold);border-bottom:1px solid var(--gold);padding:1.2rem 0}
+.exhibit .src{font-size:.8rem;color:var(--ink-soft);margin:0 0 .7rem}
+pre{
+  margin:0;padding:.9rem 1rem;background:var(--cream-deep);border-left:2.5px solid var(--gold);
+  overflow-x:auto;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.78rem;line-height:1.62;
+}
+pre b{font-weight:500;color:var(--red)}
+pre i{font-style:normal;color:var(--green)}
+
+.controls{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 1.4rem}
+.chip{font:inherit;font-size:.83rem;font-weight:500;background:none;border:1px solid var(--gold-soft);color:var(--ink-soft);padding:.3rem .72rem;border-radius:999px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:var(--cream)}
+.chip:hover{border-color:var(--gold)}
+
+.finding{border-bottom:1px solid var(--cream-sunk)}
+.finding > summary{list-style:none;cursor:pointer;padding:.85rem 0 .85rem 3.2rem;position:relative;display:grid;grid-template-columns:1fr auto;gap:.6rem 1rem;align-items:baseline}
+.finding > summary::-webkit-details-marker{display:none}
+.finding > summary::before{content:attr(data-mark);position:absolute;left:0;top:.9rem;font-family:"JetBrains Mono",monospace;font-size:.72rem;color:var(--gold)}
+.finding[data-sev="critical"] > summary::before{color:var(--red)}
+.f-title{font-size:.99rem;font-weight:500;max-width:46ch}
+.f-meta{font-size:.75rem;color:var(--ink-soft);white-space:nowrap;font-family:"JetBrains Mono",monospace}
+.finding[data-sev="critical"] .f-meta{color:var(--red)}
+.f-body{padding:0 0 1.4rem 3.2rem;max-width:44rem}
+.f-body h4{margin:1.1rem 0 .3rem;font-size:.8rem;font-weight:600;color:var(--ink-soft)}
+.f-body p{font-size:.94rem;margin-bottom:.8rem}
+.f-body .ev{font-family:"JetBrains Mono",monospace;font-size:.755rem;line-height:1.62;background:var(--cream-deep);padding:.7rem .85rem;border-left:2.5px solid var(--gold-soft);margin:0 0 .6rem;max-width:none}
+.empty{color:var(--ink-soft);font-style:italic;padding:1.5rem 0}
+
+.demo{border:1px solid var(--gold);padding:1.1rem 1.2rem;margin:1.6rem 0;max-width:38rem;background:var(--cream-deep)}
+.demo label{display:block;font-size:.86rem;margin-bottom:.45rem;color:var(--ink-soft)}
+.demo input{font-family:"JetBrains Mono",monospace;font-size:.86rem;width:100%;padding:.5rem .6rem;border:1px solid var(--gold-soft);background:var(--cream);color:var(--ink);border-radius:2px}
+.demo .out{margin-top:.85rem;font-family:"JetBrains Mono",monospace;font-size:.78rem;line-height:1.7}
+.demo .bad{color:var(--red)}
+.demo .good{color:var(--green)}
+.demo .row{display:flex;gap:.5rem;align-items:baseline}
+.demo .row span:first-child{width:7.5rem;flex:none;color:var(--ink-soft)}
+.presets{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.6rem}
+.presets button{font:inherit;font-family:"JetBrains Mono",monospace;font-size:.72rem;background:none;border:1px solid var(--gold-soft);color:var(--ink-soft);padding:.2rem .5rem;cursor:pointer;border-radius:2px}
+.presets button:hover{border-color:var(--green);color:var(--green)}
+
+.bars{margin:1.6rem 0;max-width:40rem}
+.bar{margin-bottom:.7rem}
+.bar .lab{display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.22rem;gap:1rem}
+.bar .lab span:last-child{font-family:"JetBrains Mono",monospace;font-size:.74rem;color:var(--ink-soft);white-space:nowrap}
+.track{height:15px;background:var(--cream-sunk);position:relative;overflow:hidden}
+.used{position:absolute;inset:0 auto 0 0;background:var(--green)}
+.track .hatch{position:absolute;inset:0;background-image:repeating-linear-gradient(135deg,transparent 0 4px,rgba(26,25,24,.13) 4px 5px)}
+.legend{font-size:.79rem;color:var(--ink-soft);margin-top:.9rem;display:flex;gap:1.4rem;flex-wrap:wrap}
+.legend i{display:inline-block;width:.8rem;height:.8rem;vertical-align:-.05em;margin-right:.35rem}
+
+.vitals{display:flex;flex-wrap:wrap;gap:2.2rem;margin:1.6rem 0}
+.vital .v{font-size:2rem;font-weight:600;line-height:1;letter-spacing:-.035em}
+.vital .k{font-size:.82rem;color:var(--ink-soft)}
+.vital.fail .v{color:var(--red)}
+.vital.pass .v{color:var(--green)}
+.chain{max-width:38rem;border-left:2.5px solid var(--gold);padding-left:1.1rem;margin:1.4rem 0;font-size:.96rem}
+
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(17rem,1fr));gap:2rem 2.8rem;margin-top:1.5rem}
+.item{border-top:1px solid var(--gold-soft);padding-top:.8rem}
+.item h4{margin:0 0 .3rem;font-size:.97rem;font-weight:600;letter-spacing:-.015em}
+.item p{font-size:.89rem;color:var(--ink-soft);margin:0;max-width:none}
+
+.close{padding:clamp(3rem,7vw,5rem) 0 5rem;border-bottom:0}
+.close p{max-width:38rem;font-size:1.03rem}
+footer{font-size:.82rem;color:var(--ink-soft);padding-bottom:3rem;border-top:1px solid var(--gold-soft);padding-top:1.4rem}
+
+@media (max-width:640px){
+  .finding > summary{padding-left:2.6rem;grid-template-columns:1fr}
+  .f-body{padding-left:2.6rem}
+  .f-meta{white-space:normal}
+}
+@media (prefers-reduced-motion:reduce){
+  .claim .strike::after{animation:none;transform:scaleX(1)}
+  *{transition:none!important}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <div>An audit of <b>Qashio</b>, for Qashio</div>
+  <div>Built from public evidence only. September 2026.</div>
+</header>
+
+<div class="hero">
+  <h1>The one bold instruction in your API guide points at fields that don't come back.</h1>
+
+  <div class="claim"><span class="strike">billingCurrency</span> should be used for all integrations as it represents the actual card account currency charged. <span class="strike">billingAmount</span> is the amount initially authorized on the card.</div>
+
+  <p class="verdict"><b>Neither field is ever returned.</b> Not in the list response, not in the single-transaction response. Your declared response type, <code>FindAllResErpTransactionObjectDto</code>, lists 54 properties. Neither field is among them. <code>billingCurrency</code> is at least an accepted query filter, so the concept exists somewhere server side. <code>billingAmount</code> appears nowhere in the API at all. And this is the number your customers put in a general ledger.</p>
+
+  <p class="standfirst">That took me about twenty minutes to find, in documentation you publish yourselves. Thirty-two more followed across your ERP API and your web app. This page is all of them, with the evidence attached to each one.</p>
+
+<div class="tally">
+  <div><span class="n">32</span><span>findings confirmed</span></div>
+  <div class="ok"><span class="n">8</span><span>things working well</span></div>
+  <div><span class="n">4</span><span>open questions</span></div>
+</div>
+
+<section>
+  <h2>How this was done, and where I stopped</h2>
+  <p class="lede">I don't have a Qashio account and I didn't go looking for one. Everything here came out of four places anyone can reach without a password.</p>
+  <p>Your integration guide at <code>developers.qashio.com</code>. Your OpenAPI spec, linked publicly from that same guide, at <code>erp.qashio.com/api/docs</code>. The response headers and JavaScript bundle on your unauthenticated login page. And Google's own field telemetry for that page, out of the Chrome User Experience Report.</p>
+  <p>No requests hit your API. No credentials held, none hunted for. Nothing probed, fuzzed or load-tested, and nothing behind a login touched. Reading your published docs isn't an attack, and I kept it that way on purpose. You're a regulated fintech. An applicant who treats your production systems as a sandbox has answered a completely different question than the one on your job ad.</p>
+  <p>One finding isn't on this page, and that was a choice. It's about how request scope gets established. It's a design question rather than something I proved, and proving it would have meant crossing the line above, so it came to you privately and phrased as a question, separately from this page. A stranger emailing you an unsolicited vulnerability claim isn't a contribution. It's a problem you now have to deal with.</p>
+</section>
+
+<section>
+  <h2>Exhibit one: which number goes in the ledger?</h2>
+  <p class="lede">Back to the fields from the top of this page, because the interesting part isn't that they're missing. It's what you get instead.</p>
+
+  <div class="exhibit">
+    <p class="src">developers.qashio.com, Integration-Critical Notes</p>
+    <pre><b>billingCurrency</b> should be used for all integrations as it represents
+the actual card account currency charged.
+<b>billingAmount</b> is the amount initially authorized on the card.</pre>
+  </div>
+
+  <p>Here's the response, straight from your published example:</p>
+
+  <div class="exhibit">
+    <p class="src">erp.qashio.com/api/docs, GET /erp-transactions, response example</p>
+<pre>"amount": 102,              "currency": "USD",
+"transactionAmount": 102.5, "transactionCurrency": "USD",
+"feeCharges": 2.75          <i>// no currency field, no inclusion rule</i></pre>
+  </div>
+
+  <p>Same currency. Two values. Neither one documented, and no rule for which wins. So somebody doing exactly what your guide tells them reaches for a field that isn't there, then guesses between two that are. In a market where VAT recovery hangs on which number got posted.</p>
+
+  <p>How bad is it, though? I can't tell from out here, and you can in about five minutes. Working it out means watching a transaction cross from authorisation to settlement on a real account, and I don't have one. If your amounts do update on clearing, this is a documentation defect and a serious one. If they don't, it's a settlement modelling gap, which is worse. So I logged it as an open question instead of picking whichever version sounded better.</p>
+</section>
+
+<section>
+  <h2>Exhibit two: the only endpoint that changes is the only one you cannot follow</h2>
+  <p class="lede">Chart of accounts, suppliers, tax rates and bank accounts all accept <code>updatedAtFrom</code> and <code>updatedAtTo</code>. That is master data. It barely moves.</p>
+
+  <p>Transactions get <code>clearedAtFrom</code> and <code>transactionTimeFrom</code>, both of which timestamp when the money moved, and no <code>updatedAt</code> filter at all. Meanwhile the response hands you <code>updatedAt</code> <em>and</em> <code>modifiedDate</code>. The timestamps are sitting right there. You just can't query them.</p>
+
+  <p>And transaction records move constantly after settlement. Approvals land, receipts get attached, someone edits a memo or a segment, sync status advances. None of that touches <code>clearedAt</code> or <code>transactionTime</code>, so none of it is findable without re-reading the whole thing. At 30 requests a minute and 500 rows a page, a customer with a hundred thousand transactions needs around two hundred sequential calls. Seven minutes of scanning, give or take, across a collection that's shifting underneath the cursor the entire time.</p>
+
+  <p>Offset pagination over a moving collection doesn't degrade gracefully. It breaks in two directions, so I tested both instead of asserting either:</p>
+
+  <div class="exhibit">
+    <p class="src">verify.mjs, run against the published example payloads, 10/10 passing</p>
+<pre>insert mid-scan  <b>t9 returned in both pages</b>    posted to the ledger twice
+delete mid-scan  <b>t10 never returned</b>           silently missing from the ledger
+keyset cursor    <i>no duplicate, no gap</i>          insert appears on a later page</pre>
+  </div>
+
+  <p>And since a full scan is the <em>only</em> sync mode on offer, none of this is an edge case. It's the normal condition of every sync a busy customer runs.</p>
+</section>
+
+<section>
+  <h2>Exhibit three: enum values that do not survive a round trip</h2>
+  <p class="lede">Ask in one casing, get back another. Send that same value straight back as a filter and you get zero rows, HTTP 200, no error. Which is the worst way anything can fail, because nothing tells you it happened.</p>
+
+  <div class="demo">
+    <label for="rt">Send a value back as a filter, the way a client would</label>
+    <input id="rt" type="text" value="Purchase" autocomplete="off" spellcheck="false">
+    <div class="presets" id="presets"></div>
+    <div class="out" id="rtout"></div>
+  </div>
+
+  <p>Three of the four transaction enums break on the round trip and one works fine, so you can't learn the rule from a single test. Then the integration guide lists the same enum in a third casing, <code>CARD_LOADING</code>, with one entry written <code>FORCED DEBIT</code>, space and all. Three conventions, one concept, spread across two documents and a live API.</p>
+</section>
+
+<section>
+  <h2>Exhibit four: the login page</h2>
+  <p class="lede">Google's field data says <code>app.qashio.com/login</code> fails its Core Web Vitals assessment. The failure isn't the interesting part. The cause is, because there's no ambiguity in it whatsoever.</p>
+
+  <div class="vitals">
+    <div class="vital fail"><div class="v">3.0s</div><div class="k">Largest contentful paint</div></div>
+    <div class="vital fail"><div class="v">335ms</div><div class="k">Interaction to next paint</div></div>
+    <div class="vital pass"><div class="v">0.04</div><div class="k">Cumulative layout shift</div></div>
+    <div class="vital fail"><div class="v">2.5s</div><div class="k">First contentful paint</div></div>
+    <div class="vital pass"><div class="v">0.7s</div><div class="k">Time to first byte</div></div>
+  </div>
+
+  <p class="chain">First byte lands at 0.7 seconds. Nothing paints until 2.5. That 1.8-second gap is the entire story. Your server is fine, your Dubai edge is fine, and every bit of the delay is bundle download, parse and execute against an empty HTML shell. Largest paint trails first paint by half a second, so it doesn't need its own fix. Close the gap and it comes along.</p>
+
+  <p>The bundle is 8.72&nbsp;MB across 199 resources, <strong>64.6% of it unused</strong> on first paint.</p>
+
+  <div class="bars" id="bars"></div>
+  <p class="legend"><span><i style="background:var(--blue)"></i>executed on first paint</span><span><i style="background:var(--pad-sunk)"></i>downloaded, parsed, never executed</span></p>
+
+  <p>Your support chat widget outweighs your product. Underneath it sit three chunks with no business being on a login screen at all: a data grid at 459&nbsp;KB, 89% unused. An icon set at 392&nbsp;KB, 97% unused. A page shell at 333&nbsp;KB, 96% unused. So 1.21&nbsp;MB of authenticated application code goes out to every visitor who never logs in. For a form with two inputs and a button.</p>
+
+  <p>And 335&nbsp;ms of interaction latency on that form isn't your application logic. It's main-thread contention, which brings us to everything else that's loading.</p>
+
+  <h3>Thirteen third-party tracking products on the authentication origin</h3>
+
+  <p>The cookies transmitted to the login page identify thirteen distinct third-party products: Meta, Google Analytics across three separate properties, Microsoft Clarity, Hotjar, HubSpot, Google Ads, Intercom, ContentSquare, Reddit Ads, Microsoft Bing UET, PostHog across two separate projects, Leadfeeder, and one unidentified vendor writing a <code>__ps_</code> cookie family. Google Sign-In is there too, but that is authentication rather than tracking, so I have left it out of the count. They are scoped to the parent domain, so the full paid-search attribution chain rides along onto the app origin. Campaign names, keyword terms, click identifiers.</p>
+
+  <p>Four of those offer DOM-level session replay. They record rendered content and form input. This is the origin that, one screen later, shows your customers' cardholder names, emails, masked card numbers, balances and transaction detail.</p>
+
+  <p>There is no <code>Content-Security-Policy</code> header on that origin. You set HSTS. You set <code>nosniff</code>. You set <code>X-Frame-Options</code>, though CSP's frame-ancestors has superseded it. You set <code>X-XSS-Protection: 1; mode=block</code>, which current guidance says to turn off rather than on. The one policy that would constrain what those scripts may read, and where they may send it, is the one that's missing.</p>
+
+  <p>Let me be exact about what I'm claiming, because this one matters. Exposure surface, not incident. Whether you've masked or disabled replay after login, I can't see from out here and I didn't go looking. What I can see is that the control which would enforce it isn't there. Only vendor configuration is, and configuration is one dashboard toggle from being something else.</p>
+</section>
+
+<section>
+  <h2>The register</h2>
+  <p class="lede">Every claim on this page comes out of one file, source and status attached to each, so you can check any of them against your own systems. Nothing gets asserted in one spot and quietly contradicted somewhere else.</p>
+
+  <div class="controls" id="controls"></div>
+  <div id="register"></div>
+</section>
+
+<section>
+  <h2>What is working</h2>
+  <p class="lede">A study that only attacks isn't an audit. It's an audition for a grudge. Plenty of what you've built is done well, and a couple of things are done better than most teams manage.</p>
+  <div class="two" id="working"></div>
+</section>
+
+<section>
+  <h2>What I could not determine</h2>
+  <p class="lede">Not findings. This is the edge of what public evidence establishes, written down so you can see exactly where I stopped. Most of these you can answer internally in minutes.</p>
+  <div class="two" id="questions"></div>
+</section>
+
+<div class="close">
+  <h2>The gap I'd want to work on</h2>
+  <p>One thing I kept circling that isn't in the register above, because it's a roadmap observation rather than a defect.</p>
+  <p>You already ship AI in production. Your marketing says receipt matching and WhatsApp receipt collection, and your API backs that up. <code>receipts</code> comes back as an array of URLs, and your guide documents <code>vendorTrn</code> as captured from the user-uploaded invoice. So there's an extraction pipeline running today, and a supplier's VAT registration number is coming out of a model.</p>
+  <p>What the API doesn't return is any confidence score, any flag separating a value a model extracted from a value a human typed, and any review state. From an integrator's side those two are indistinguishable. One of them feeds UAE FTA compliance.</p>
+  <p>That's not a bug, and nobody's shipped the wrong thing. It's the shape of the work your job ad describes. Eval sets, acceptance criteria for non-deterministic output, guardrails on what a model is trusted to assert about money. I'd want provenance on every extracted field, a confidence threshold that routes low-scoring extractions to human review instead of straight to the ledger, and an eval set built from real receipts so quality regressions show up before a customer's VAT return does.</p>
+  <p>Thirty-two findings. Eight things working. Four open questions. All of it from your documentation and your login screen, which is roughly a thousandth of what's visible from inside.</p>
+</div>
+
+<footer>
+  Typeface and palette on this page are yours, read out of your production bundle: Inter, and the cream, gold and deep green your application actually ships. A public brand directory lists #25D366 for Qashio; that colour appears zero times in your code, because it's WhatsApp's. Correction red is mine, not yours.<br><br>Sources: your integration guide and OpenAPI specification, both public. Response headers and coverage profile of the unauthenticated login page. Chrome User Experience Report field data, 28-day window ending 13 September 2026. No authenticated access at any point.
+</footer>
+
+</div>
+
+<script>
+const F = [
+ {id:"QF-01",sev:"critical",cat:"correctness",t:"Integration guidance mandates two fields the API never returns",ev:"Guide: billingCurrency should be used for all integrations and billingAmount is the authorised amount. Confirmed against the declared response type FindAllResErpTransactionObjectDto, which lists 54 properties and includes neither. billingCurrency is an accepted query filter; billingAmount is absent from the entire API surface, while transactionAmount and vatAmount both carry From/To range filters.",im:"An integrator following the most emphatic instruction in the documentation reaches for fields that do not exist in the declared type their API returns. Verified against the DTO, not the rendered example.",fx:"Serialise both fields, or remove them from the filter set and the guidance and name the field that actually carries the settled charge."},
+ {id:"QF-24",sev:"critical",cat:"contract",t:"Optional fields declared required, including fields that cannot exist yet",ev:"FindAllResErpTransactionObjectDto marks 52 of 54 properties required. Only parentId and parentQashioId are optional. Required fields include memo, purchaseOrderNumber, vendorTrn, approvedDateTime, approvedBy, clearedAt, chartOfAccountNumber and feeCharges. The same example marks approvalStatus as Pending while approvedDateTime is required and populated.",im:"These fields are structurally absent for whole classes of transaction. There is no approver before approval, no clearing timestamp before settlement, no OCR-extracted tax number without a receipt. Either the API returns null for fields it declares mandatory, or a generated client types them non-nullable and consumers skip null handling. In TypeScript that produces code which compiles, passes review, and throws on the first transaction without a memo.",fx:"Audit nullability per field against real data and mark the optional ones optional. In NestJS that is ApiPropertyOptional. Assert the resulting contract in integration tests so drift gets caught in CI."},
+ {id:"QF-25",sev:"high",cat:"contract",t:"Six payload fields declared with no item type, including line items and segments",ev:"approvedBy is declared as an empty object with an attached example. syncErrors, receipts, segments, customSegments and lineItems are bare arrays with no item schema. The 400 response body is declared the same way.",im:"A generated client types all six as any or any[]. These are not peripheral: lineItems carries the GL allocation, segments carries the accounting dimensions, syncErrors reports why a sync failed. The type safety the spec appears to provide is missing exactly where the accounting data lives. Consistent with ApiProperty declarations that supply an example but omit type.",fx:"Declare DTOs for each nested shape and reference them with type and isArray. The spec already defines StandardSegmentDto and CustomSegmentDto; the transaction response simply does not reference them."},
+ {id:"QF-26",sev:"critical",cat:"documentation",t:"The guide defines billingAmount two different ways on the same page",ev:"Field table: billingAmount is the Amount charged to card in Local (Card Account) Currency, sample 77.14. Integration-Critical Notes, further down the same page: billingAmount is the amount initially authorized on the card.",im:"Charged and authorised are different numbers. They diverge on FX movement between authorisation and clearing, tips, partial captures, and hotel, car-rental and fuel pre-authorisations. Two integrators reading two sections of one document post two different figures to the general ledger, and neither knows the other exists. This sits on top of QF-01, where the field is absent from the contract entirely.",fx:"Pick one definition, state it once, delete the other. If both concepts are needed, name them separately and return both."},
+ {id:"QF-02",sev:"critical",cat:"correctness",t:"Two undocumented amount fields with different values and no stated relationship",ev:"Response carries amount: 102 with currency USD, and transactionAmount: 102.5 with transactionCurrency USD. The guide documents neither amount nor currency.",im:"Four amount-like fields exist across documentation and payload, with two different values in one currency and no rule for which is authoritative. This is the number that becomes a ledger entry.",fx:"One settled amount, one original amount, explicit names, a documented invariant between them."},
+ {id:"QF-03",sev:"critical",cat:"operability",t:"The only endpoint whose records mutate is the only one without delta-sync filters",ev:"Four master-data endpoints accept updatedAtFrom/updatedAtTo. GET /erp-transactions accepts clearedAt and transactionTime ranges only, while returning both updatedAt and modifiedDate.",im:"Data that rarely changes supports incremental sync. Data that changes hourly requires a full re-scan to detect any change.",fx:"Add updatedAt filtering, or preferably a monotonic cursor."},
+ {id:"QF-04",sev:"high",cat:"operability",t:"Offset pagination over a mutating collection, at a page rate that guarantees drift",ev:"30 requests per minute, 500 rows maximum per page, page plus limit or pageSize. No cursor, no documented stable sort key.",im:"A 100k-transaction company needs ~200 sequential requests, roughly seven minutes, during which inserts duplicate rows and deletions skip them. Verified in both directions by test.",fx:"Keyset pagination on an immutable monotonic column, cursor opaque to the client."},
+ {id:"QF-05",sev:"high",cat:"correctness",t:"Line items do not reconcile to the transaction header in the published example",ev:"Header: amount 102, transactionAmount 102.5, vatAmount 12. Two line items at amount 120 and vatAmount 14 each. Totals: 240 and 28.",im:"Whether line items must sum to the header is the central invariant for splitting one card transaction across GL codes. The published example answers no, and no invariant is stated.",fx:"Product decision. State the invariant and enforce it, or document line items as an independent allocation layer."},
+ {id:"QF-06",sev:"high",cat:"correctness",t:"segments already contains custom segments, which customSegments then repeats",ev:"The segments array includes entries labelled CustomSegment-Vender and CustomSegment-Customer. The customSegments array contains a duplicate of the first, same name, label and code.",im:"The field naming invites concatenating both arrays. Doing so double-counts every custom segment, duplicating GL dimensions on line-level allocation. Reproduced by test.",fx:"One array with an isCustom discriminator, or make customSegments a view rather than a second copy."},
+ {id:"QF-07",sev:"high",cat:"consistency",t:"Enum values do not round-trip, and fail inconsistently",ev:"Requests use lowercase; responses return Pascal case for transactionCategory, approvalStatus, erpSyncStatus, card status and cardType, but lowercase for transactionStatus. The guide lists the same enum in upper snake case, with one entry containing a space.",im:"Feeding back a value you just received returns zero rows and no error. Three of four break and one works, so the failure is not learnable from a single test.",fx:"One canonical casing, case-insensitive input matching, declared enums in the spec."},
+ {id:"QF-08",sev:"high",cat:"contract",t:"Two different response envelope shapes across the same API",ev:"The ERP group returns the pagination envelope wrapped in an array. The card group returns it bare.",im:"A client writes response[0].data for one half of the API and response.data for the other, with nothing in the path or tag to signal which. The array wrapper looks like a findAndCount tuple leaking through a serialiser.",fx:"Unwrap the ERP group. Version the change."},
+ {id:"QF-09",sev:"high",cat:"contract",t:"No authentication or rate-limit failure responses are specified anywhere",ev:"Every endpoint requires two auth headers. The ERP group documents 200 and 400; the card group documents only 200. No endpoint declares 401, 403 or 429, and no Retry-After contract exists.",im:"A generated client gets typed handling for the one failure that will not dominate production and none for the three that will.",fx:"Declare all three on every operation, with a consistent error body and a documented Retry-After."},
+ {id:"QF-10",sev:"high",cat:"correctness",t:"feeCharges carries no currency and no inclusion semantics",ev:"The response returns feeCharges: 2.75 with no currency field and no documentation. It does not appear in the integration guide at all.",im:"On cross-border spend this is the FX markup. Whether it is included in or additional to the amount affects both expense and recoverable VAT.",fx:"Add feeCurrency and document inclusion semantics."},
+ {id:"QF-11",sev:"medium",cat:"correctness",t:"Monetary values serialised as bare JSON numbers",ev:"Amounts are typed Decimal in the guide and serialised unquoted in the spec examples: 102, 102.5, 2.75, 77.14.",im:"JSON has no decimal type. Most parsers route unquoted numbers through IEEE-754 doubles. Summing 500 rows drifts from the exact total, demonstrated by test.",fx:"Serialise money as strings, or integer minor units with an explicit exponent."},
+ {id:"QF-12",sev:"medium",cat:"contract",t:"Redundant identity and state pairs throughout the transaction model",ev:"Both id and qashioId, both parentId and parentQashioId, both status and transactionStatus, both updatedAt and modifiedDate, three timestamps, and both visible and excludeFromSync.",im:"The guide says to ignore id, then names parentId, a GUID referencing id, as the only documented reversal linkage, so reversals cannot be joined to purchases using public fields alone. Duplicate state pairs can disagree with no documented precedence.",fx:"Drop the internal UUID from the public surface, expose parentQashioId, collapse each duplicate pair."},
+ {id:"QF-13",sev:"medium",cat:"consistency",t:"Pagination parameter names differ between endpoint groups",ev:"ERP group uses limit with default 10. Card group uses pageSize with default 20. Statements defaults to 20 on the collection and 12 on the detail route.",im:"The wrong parameter name is silently ignored and the endpoint returns its default page size, so the bug surfaces as missing data rather than a failed request.",fx:"One parameter name. Reject unknown query parameters rather than ignoring them."},
+ {id:"QF-14",sev:"medium",cat:"contract",t:"Duplicated and overlapping configuration objects on cards and pool accounts",ev:"Cards return both topupConfiguration and autoTopUpConfiguration with overlapping fields and inconsistent casing of TopUp, plus atmWithdrawalAllowed at two levels. Pool accounts return both topupConfiguration and balanceAndTopupConfiguration.",im:"Reads as a half-finished migration frozen into the public contract. Two representations of one piece of state can disagree, with no documented precedence.",fx:"Keep the nested representation, deprecate the flat duplicates with a sunset date."},
+ {id:"QF-15",sev:"medium",cat:"correctness",t:"Company summary reports five balances with no timestamp and undefined multi-currency semantics",ev:"GET /company/summary returns five balance buckets under one top-level currency with no asOf field, while cards and pool accounts carry their own currencies.",im:"No stated invariant between component balances and the total, no point-in-time anchor, and undefined conversion rate and timing where component accounts differ in currency.",fx:"Product decision. Add asOf, state the summation invariant, document or eliminate cross-currency aggregation."},
+ {id:"QF-16",sev:"medium",cat:"operability",t:"No push delivery; polling is the only integration mode",ev:"The specification exposes GET operations only. No webhook registration, subscription endpoint or event resource.",im:"Combined with the delta-sync and pagination findings, data freshness is bounded by full-scan duration while the product is marketed on real-time visibility.",fx:"Signed webhooks for transaction lifecycle events, with replay and an at-least-once delivery contract."},
+ {id:"QF-17",sev:"medium",cat:"coverage",t:"Declines are not exposed, and the field that would carry them is absent",ev:"The guide documents statusCode as always 0000 with unsuccessful transactions filtered out. statusCode does not appear in the response schema at all.",im:"A declined card at a merchant is the highest-volume support event for a corporate card programme, and it is invisible through the API.",fx:"Product decision. Expose declines behind a filter defaulting to approved-only."},
+ {id:"QF-18",sev:"medium",cat:"documentation",t:"The integration guide has drifted a year behind the served contract",ev:"Stamped last updated one year ago. It omits clearedAt, clearingStatus, mccCode, merchantCity, merchantCountry, feeCharges, syncErrors, erpSyncStatus, approvedBy, employeeId, parentQashioId, status, createdAt, updatedAt and modifiedDate, all present in the specification.",im:"This is the entry point and the only narrative guidance that exists. Several other findings here are downstream of it rather than independent defects.",fx:"Generate the field reference from the specification so drift becomes structurally impossible; keep the written page to narrative only."},
+ {id:"QF-19",sev:"medium",cat:"contract",t:"No lookup by the identifier the documentation designates as public",ev:"qashioId is documented as the immutable reference shown on the dashboard, and id as internal and to be ignored. The detail route takes the internal UUID; qashioId is a collection filter only.",im:"The identifier a finance user can see cannot fetch a record directly. Retrieval requires a filtered collection call and unwrapping a single-element array nested inside another array.",fx:"Accept qashioId on the detail path."},
+ {id:"QF-20",sev:"low",cat:"contract",t:"Boolean filters typed as strings, inconsistently",ev:"isDeleted is declared string with values true and false on four endpoints while the response field is boolean. excludeFromSync on transactions is correctly declared boolean.",im:"Generated clients produce string parameters for boolean concepts on four endpoints and a proper boolean on the fifth.",fx:"Declare all boolean filters as boolean."},
+ {id:"QF-21",sev:"low",cat:"documentation",t:"Copy-paste errors in response descriptions and example data",ev:"Returns all ERP Suppliers appears on tax-rates, bank-accounts and transactions. accountType is spelled Assest in both chart-of-accounts examples. One card example is simultaneously Active, never activated, and terminated. erp_internal_id is snake_case inside camelCase objects.",im:"Individually trivial. Together they indicate the specification is generated but not reviewed, which is the same mechanism behind the envelope and error-response findings.",fx:"Specification linting in CI, with these findings as the initial rule set."},
+ {id:"QF-22",sev:"low",cat:"contract",t:"Raw ISO 8583 message type exposed without an enum",ev:"The response returns messageType: MTI123, which is not a valid MTI. The guide states that the AFT category is a purchase or a reversal depending on messageType, making the field load-bearing.",im:"An accounting-facing API leaks switching-layer detail that integrators are told to branch on, with no documented value set and a placeholder example.",fx:"Document the value set, or derive the distinction server-side and expose a typed category."},
+ {id:"QF-23",sev:"low",cat:"contract",t:"syncErrors returned with no schema",ev:"Present as an empty array in every example, with no item schema declared and no mention in the guide.",im:"The field reporting why a transaction failed to reach a customer's ERP has no documented shape, so no client can parse it without observing production data.",fx:"Declare the item schema with a stable error code, message and timestamp."},
+ {id:"QF-30",sev:"critical",cat:"security",t:"No Content-Security-Policy on the authentication origin",ev:"Response headers include HSTS, nosniff, X-Frame-Options SAMEORIGIN and X-XSS-Protection 1; mode=block. There is no content-security-policy, no permissions-policy and no cross-origin-opener-policy.",im:"CSP is the primary control limiting which scripts execute and where data may be sent. The two headers present are legacy: one is superseded by a CSP directive, the other is deprecated with current guidance to disable it.",fx:"Report-Only first to gather violations, then enforce with explicit script-src and connect-src allowlists, frame-ancestors, Permissions-Policy and COOP."},
+ {id:"QF-31",sev:"critical",cat:"privacy",t:"Thirteen third-party tracking products on the authentication origin, four of them session recorders",ev:"Cookies identify Meta (_fbp), Google Analytics (3 properties), Microsoft Clarity, Hotjar, HubSpot, Google Ads, Intercom, ContentSquare, Reddit Ads, Microsoft Bing UET, PostHog (2 projects), Leadfeeder (_lfa), and an unidentified __ps_ family. Google Sign-In is present but excluded as functional authentication. Parent-domain scoping carries gclid, campaign names and keyword terms onto the app origin.",im:"Clarity, Hotjar, ContentSquare and PostHog offer DOM-level session replay capturing rendered content and form input, on an origin that renders cardholder data once authenticated. Combined with the missing CSP, only vendor configuration prevents this.",fx:"Split the origin, scope cookies to the host, enforce masking in code rather than vendor dashboards, gate transmission with CSP connect-src.",note:"Stated as exposure surface. No claim is made that replay currently captures cardholder data; that is not observable without authenticated access and was not tested."},
+ {id:"QF-32",sev:"high",cat:"performance",t:"The support chat widget outweighs the entire first-party application",ev:"8.72 MB across 199 resources, 64.6% unused on first paint. Intercom is 4.44 MB across 10 files at 43.6% used; the first-party application is 3.93 MB across 185 files at 26.5% used. Third-party code is 54.9% of all bytes. Decimal MB throughout.",im:"A visitor to the login screen downloads more JavaScript for the support widget than for the product, before authenticating.",fx:"Lazy-load on user intent and exclude from the unauthenticated route. Largest available byte reduction, no application refactor required."},
+ {id:"QF-33",sev:"high",cat:"performance",t:"Authenticated application code is shipped to unauthenticated visitors",ev:"On /login: a data grid at 459 KB and 89% unused, an icon set at 392 KB and 97% unused, a page shell at 333 KB and 96% unused. 125 of 185 first-party files are under 5 KB, so chunking is fine-grained but not route-aligned.",im:"1.21 MB of post-authentication surface delivered to every visitor who never logs in, and the shape of the authenticated interface becomes enumerable from outside.",fx:"Route-level splitting with the authenticated shell behind a dynamic import gated on session state."},
+ {id:"QF-34",sev:"high",cat:"performance",t:"Core Web Vitals failing in field data, with the bottleneck provably client-side",ev:"CrUX mobile: assessment failed. LCP 3.0s, INP 335ms, CLS 0.04, FCP 2.5s, TTFB 0.7s. The document is a static shell; the application is client-rendered React on Vite.",im:"1.8 seconds elapse between first byte and first paint. LCP trails FCP by 0.5s so it needs no separate fix. INP of 335ms on a two-field form indicates main-thread contention, not application logic.",fx:"By measured yield: defer the chat widget, gate authenticated chunks, defer non-essential analytics past interactive, then consider server-rendering the login route."},
+ {id:"QF-35",sev:"medium",cat:"performance",t:"Legacy date and utility libraries shipped in full",ev:"moment at 59 KB and 74.5% unused with locale data present, lodash at 69 KB and 73.5% unused, both as separate chunks.",im:"Moment has been in maintenance mode for years and its own maintainers advise against it for new work. Both are largely unused on the measured route.",fx:"date-fns or Temporal, and per-method lodash imports or native equivalents. Mechanical, low risk, well suited to agent-assisted refactoring with tests defining correctness."},
+ {id:"QF-36",sev:"low",cat:"performance",t:"Login shell marked no-store, forcing an origin fetch on every visit",ev:"cache-control: no-cache, no-store, must-revalidate on the document, alongside an ETag and Last-Modified. CloudFront reports a miss.",im:"The validators indicate revalidation was intended, but no-store forbids storage entirely, so revalidation can never occur and the CDN cannot serve it.",fx:"Use no-cache alone, which permits storage with mandatory revalidation and lets the ETag work."}
+];
+
+const W = [
+ ["No source maps exposed in production","Zero of 185 first-party files reference a sourceMappingURL. A common and avoidable leak on React applications, correctly configured here."],
+ ["Layout stability is genuinely good","Cumulative layout shift of 0.04 in field data, comfortably inside the good threshold and notably better than typical for a client-rendered application."],
+ ["HSTS with subdomain coverage","A one-year max-age including subdomains. Only preload is absent."],
+ ["Edge presence in region","CloudFront serving from a Dubai point of presence, with a 0.7s time to first byte confirming delivery infrastructure is not the bottleneck."],
+ ["The transaction filter surface is excellent","Twenty-five query parameters covering category, sync and approval status, card, employee, chart of account, tax rate, VAT and amount ranges, both currencies, cardholder and two time ranges. Where this API is good it is very good. The defects are contract and consistency, not capability."],
+ ["Production error monitoring in place","Sentry present in the shipped bundle."],
+ ["Content type sniffing disabled","nosniff set on the document response."],
+ ["A modern toolchain, already chunked","React 18 with createRoot on a Vite build. Fine-grained chunking exists; it is misaligned to routes rather than absent, which makes the performance findings a configuration fix rather than a rewrite."]
+];
+
+const Q = [
+ ["Do amounts update on clearing?","Determines whether the billing-field finding is a documentation defect or an authorisation-versus-settlement modelling gap, which materially changes its severity. Requires watching a transaction cross the settlement boundary with a real account."],
+ ["Are receipt URLs signed and time-limited?","Receipts carry supplier VAT registration numbers, amounts and line detail. The response returns absolute URLs with no stated access-control model. Not testable from outside, and not tested."],
+ ["How is request scope established?","A design question about the relationship between the credential and the company identifier. Sent to Qashio privately, phrased as a question. Deliberately absent from this page."],
+ ["Where does Next.js live?","The role specifies React and Next.js. The login application is client-rendered React on Vite, with no Next.js fingerprint in any of 185 first-party files. If a migration is planned, the performance findings become its business case rather than a separate ask."]
+];
+
+const SEV = ["critical","high","medium","low"];
+const MARK = {critical:"!!",high:"!",medium:"\u00b7",low:""};
+let active = "all";
+
+const esc = s => s.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+function render(){
+  const list = active === "all" ? F : F.filter(f => f.sev === active || f.cat === active);
+  const el = document.getElementById("register");
+  if(!list.length){ el.innerHTML = '<p class="empty">Nothing in this category.</p>'; return; }
+  el.innerHTML = list.map(f => `
+    <details class="finding" data-sev="${f.sev}">
+      <summary data-mark="${MARK[f.sev]}">
+        <span class="f-title">${esc(f.t)}</span>
+        <span class="f-meta">${f.id} ${f.sev}</span>
+      </summary>
+      <div class="f-body">
+        <h4>Evidence</h4><p class="ev">${esc(f.ev)}</p>
+        <h4>Why it matters</h4><p>${esc(f.im)}</p>
+        <h4>Fix</h4><p>${esc(f.fx)}</p>
+        ${f.note ? `<h4>Scope of this claim</h4><p>${esc(f.note)}</p>` : ""}
+      </div>
+    </details>`).join("");
+}
+
+(function controls(){
+  const cats = [...new Set(F.map(f => f.cat))].sort();
+  const opts = [["all","Everything"], ...SEV.map(s => [s, s[0].toUpperCase()+s.slice(1)]), ...cats.map(c => [c, c[0].toUpperCase()+c.slice(1)])];
+  const c = document.getElementById("controls");
+  c.innerHTML = opts.map(([v,l]) => {
+    const n = v === "all" ? F.length : F.filter(f => f.sev === v || f.cat === v).length;
+    return `<button class="chip" data-v="${v}" aria-pressed="${v==="all"}">${l} ${n}</button>`;
+  }).join("");
+  c.addEventListener("click", e => {
+    const b = e.target.closest(".chip"); if(!b) return;
+    active = b.dataset.v;
+    [...c.children].forEach(x => x.setAttribute("aria-pressed", x === b));
+    render();
+  });
+})();
+render();
+
+document.getElementById("working").innerHTML =
+  W.map(([h,p]) => `<div class="item"><h4>${h}</h4><p>${p}</p></div>`).join("");
+document.getElementById("questions").innerHTML =
+  Q.map(([h,p]) => `<div class="item"><h4>${h}</h4><p>${p}</p></div>`).join("");
+
+/* ---- round-trip demo ---- */
+const ACCEPTED = ["card_loading","purchase","card_unloading","deposit","reversal","account_verification","balance_inquiry","cash_withdrawal","refund","forced_debit","aft","account_loading","cashback","account_unloading","account_transfer"];
+const canon = s => s.trim().toLowerCase().replace(/[\s-]+/g,"_");
+const rt = document.getElementById("rt"), rtout = document.getElementById("rtout");
+
+function check(){
+  const v = rt.value;
+  const today = ACCEPTED.includes(v);
+  const fixed = ACCEPTED.includes(canon(v));
+  rtout.innerHTML =
+    `<div class="row"><span>Today</span><span class="${today?"good":"bad"}">${
+      today ? "matches, rows returned" : "no match \u2014 zero rows, HTTP 200, no error"}</span></div>` +
+    `<div class="row"><span>After the fix</span><span class="${fixed?"good":"bad"}">${
+      fixed ? "canonicalised to " + canon(v) + ", rows returned"
+            : "rejected with HTTP 400 naming the valid values"}</span></div>`;
+}
+rt.addEventListener("input", check); check();
+
+document.getElementById("presets").innerHTML =
+  ["Purchase","purchase","CARD_LOADING","FORCED DEBIT","Pending"]
+    .map(v => `<button type="button">${v}</button>`).join("");
+document.getElementById("presets").addEventListener("click", e => {
+  if(e.target.tagName !== "BUTTON") return;
+  rt.value = e.target.textContent; check(); rt.focus();
+});
+
+/* ---- coverage bars ---- */
+const COV = [
+  ["Intercom chat widget", 4.44, 43.6],
+  ["Qashio application", 3.93, 26.5],
+  ["Google Sign-In", 0.28, 33.8],
+  ["Apple Sign-In", 0.04, 26.5],
+  ["Google Fonts", 0.03, 0]
+];
+document.getElementById("bars").innerHTML = COV.map(([n,mb,used]) => `
+  <div class="bar">
+    <div class="lab"><span>${n}</span><span>${mb.toFixed(2)} MB \u00b7 ${used.toFixed(0)}% used</span></div>
+    <div class="track"><div class="used" style="width:${used}%"></div><div class="hatch"></div></div>
+  </div>`).join("");
+</script>
+</body>
+</html>
