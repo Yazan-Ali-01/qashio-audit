@@ -357,6 +357,13 @@ keyset cursor    <i>no duplicate, no gap</i>          insert appears on a later 
 </div>
 
 <script>
+/* Vercel Web Analytics bootstrap. Kept inside this block rather than as a
+   second inline script so the page still carries exactly one script hash.
+   The collector is first-party: script and beacon are both same-origin
+   under /_vercel/insights/, which is why script-src 'self' and
+   connect-src 'self' are enough and no third-party origin is allowed. */
+window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+
 const F = [
  {id:"QF-01",sev:"critical",cat:"correctness",t:"Integration guidance mandates two fields the API never returns",ev:"Guide: billingCurrency should be used for all integrations and billingAmount is the authorised amount. Confirmed against the declared response type FindAllResErpTransactionObjectDto, which lists 54 properties and includes neither. billingCurrency is an accepted query filter; billingAmount is absent from the entire API surface, while transactionAmount and vatAmount both carry From/To range filters.",im:"An integrator following the most emphatic instruction in the documentation reaches for fields that do not exist in the declared type their API returns. Verified against the DTO, not the rendered example.",fx:"Serialise both fields, or remove them from the filter set and the guidance and name the field that actually carries the settled charge."},
  {id:"QF-24",sev:"critical",cat:"contract",t:"Optional fields declared required, including fields that cannot exist yet",ev:"FindAllResErpTransactionObjectDto marks 52 of 54 properties required. Only parentId and parentQashioId are optional. Required fields include memo, purchaseOrderNumber, vendorTrn, approvedDateTime, approvedBy, clearedAt, chartOfAccountNumber and feeCharges. The same example marks approvalStatus as Pending while approvedDateTime is required and populated.",im:"These fields are structurally absent for whole classes of transaction. There is no approver before approval, no clearing timestamp before settlement, no OCR-extracted tax number without a receipt. Either the API returns null for fields it declares mandatory, or a generated client types them non-nullable and consumers skip null handling. In TypeScript that produces code which compiles, passes review, and throws on the first transaction without a memo.",fx:"Audit nullability per field against real data and mark the optional ones optional. In NestJS that is ApiPropertyOptional. Assert the resulting contract in integration tests so drift gets caught in CI."},
@@ -503,5 +510,6 @@ barsEl.innerHTML = COV.map(([n,mb,used]) => `
    blocked by this page's own CSP. The CSSOM is not subject to style-src. */
 barsEl.querySelectorAll(".used").forEach((el, i) => { el.style.width = COV[i][2] + "%"; });
 </script>
+<script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>
